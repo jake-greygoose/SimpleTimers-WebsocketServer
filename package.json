@@ -1,0 +1,20 @@
+{
+  "name": "simple-timers-wss-server",
+  "version": "1.0.0",
+  "description": "WebSocket Secure server for collaborative timers on Render.com",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^8.5.0",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
