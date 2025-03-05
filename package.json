@@ -11,6 +11,7 @@
     "node": ">=16.0.0"
   },
   "dependencies": {
+    "sqlite3": "^5.1.6",
     "ws": "^8.14.2"
   },
   "devDependencies": {
