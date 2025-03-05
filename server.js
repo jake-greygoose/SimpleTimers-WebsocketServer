@@ -1,8 +1,9 @@
 const http = require('http');
 const WebSocket = require('ws');
+const sqlite3 = require('sqlite3').verbose();
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
 
 // Create a simple HTTP server
 const server = http.createServer((req, res) => {
@@ -13,210 +14,100 @@ const server = http.createServer((req, res) => {
 // Get port from environment variable (required for Render.com)
 const PORT = process.env.PORT || 8080;
 
-// Simple in-memory database implementation
-class InMemoryDB {
-  constructor() {
-    this.rooms = new Map();
-    this.timers = new Map();
-    this.clients = new Map();
-    
-    // Create default room
-    this.rooms.set('default', {
-      id: 'default',
-      name: 'Public Room',
-      created_at: Math.floor(Date.now() / 1000),
-      password: null,
-      is_public: true
-    });
-  }
-  
-  // Room methods
-  createRoom(id, name, created_at, password, is_public) {
-    this.rooms.set(id, {
-      id,
-      name,
-      created_at,
-      password,
-      is_public: is_public ? true : false
-    });
-    return this.rooms.get(id);
-  }
-  
-  getRoom(id) {
-    return this.rooms.get(id) || null;
-  }
-  
-  getPublicRooms(clientRoomId = 'default') {
-    const results = [];
-    for (const [id, room] of this.rooms.entries()) {
-      if (room.is_public || id === clientRoomId) {
-        // Count clients in this room
-        let client_count = 0;
-        for (const client of this.clients.values()) {
-          if (client.room_id === id) {
-            client_count++;
-          }
-        }
-        
-        results.push({
-          ...room,
-          client_count
-        });
-      }
-    }
-    return results.sort((a, b) => a.name.localeCompare(b.name));
-  }
-  
-  verifyRoomPassword(roomId, password) {
-    const room = this.rooms.get(roomId);
-    if (!room) return false;
-    return room.password === null || room.password === password;
-  }
-  
-  // Timer methods
-  createTimer(id, room_id, name, duration, created_at, status) {
-    const timer = {
-      id,
-      room_id,
-      name,
-      duration,
-      created_at,
-      started_at: null,
-      paused_at: null,
-      completed_at: null,
-      status
-    };
-    this.timers.set(id, timer);
-    return timer;
-  }
-  
-  updateTimerStatus(id, status, started_at, paused_at, completed_at) {
-    const timer = this.timers.get(id);
-    if (!timer) return null;
-    
-    timer.status = status;
-    
-    if (started_at !== null) {
-      timer.started_at = started_at;
-    }
-    
-    if (paused_at !== null) {
-      timer.paused_at = paused_at;
-    }
-    
-    if (completed_at !== null) {
-      timer.completed_at = completed_at;
-    }
-    
-    return timer;
-  }
-  
-  getTimer(id) {
-    return this.timers.get(id) || null;
-  }
-  
-  getActiveTimers(room_id) {
-    const results = [];
-    for (const timer of this.timers.values()) {
-      if (timer.room_id === room_id && ['running', 'paused'].includes(timer.status)) {
-        results.push(timer);
-      }
-    }
-    return results.sort((a, b) => b.created_at - a.created_at);
-  }
-  
-  getAllTimers(room_id) {
-    const results = [];
-    for (const timer of this.timers.values()) {
-      if (timer.room_id === room_id) {
-        results.push(timer);
-      }
-    }
-    return results.sort((a, b) => b.created_at - a.created_at);
-  }
-  
-  // Client methods
-  upsertClient(id, room_id, last_seen) {
-    this.clients.set(id, {
-      id,
-      room_id,
-      last_seen
-    });
-    return this.clients.get(id);
-  }
-  
-  getClientsInRoom(room_id) {
-    let count = 0;
-    for (const client of this.clients.values()) {
-      if (client.room_id === room_id) {
-        count++;
-      }
-    }
-    return { count };
-  }
-  
-  // Cleanup old clients
-  cleanupInactiveClients(cutoff) {
-    for (const [id, client] of this.clients.entries()) {
-      if (client.last_seen < cutoff) {
-        this.clients.delete(id);
-      }
-    }
-  }
-  
-  // Persistence methods (optional, for saving state between restarts)
-  saveToFile(filePath) {
-    const data = {
-      rooms: Array.from(this.rooms.values()),
-      timers: Array.from(this.timers.values()),
-      clients: Array.from(this.clients.values())
-    };
-    
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-  }
-  
-  loadFromFile(filePath) {
-    if (!fs.existsSync(filePath)) return;
-    
-    try {
-      const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      
-      // Clear existing data
-      this.rooms.clear();
-      this.timers.clear();
-      this.clients.clear();
-      
-      // Load data
-      for (const room of data.rooms) {
-        this.rooms.set(room.id, room);
-      }
-      
-      for (const timer of data.timers) {
-        this.timers.set(timer.id, timer);
-      }
-      
-      for (const client of data.clients) {
-        this.clients.set(client.id, client);
-      }
-    } catch (error) {
-      console.error('Error loading data from file:', error);
-    }
-  }
+// Ensure tmp directory exists for Render.com
+const dbDir = process.env.NODE_ENV === 'production' ? '/tmp' : './data';
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
 }
 
-// Initialize database
-const db = new InMemoryDB();
+// Configure database path that works on Render.com
+const dbPath = path.join(dbDir, 'timer_app.db');
+console.log(`Using database at: ${dbPath}`);
 
-// Try to load saved data (if using file persistence)
-const dataPath = process.env.NODE_ENV === 'production'
-  ? path.join('/tmp', 'timer_app_data.json')
-  : path.join(__dirname, 'timer_app_data.json');
+// Initialize SQLite database
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('Database opening error: ', err);
+  } else {
+    console.log('Connected to SQLite database');
+    initializeDatabase();
+  }
+});
 
-try {
-  db.loadFromFile(dataPath);
-  console.log('Loaded saved data');
-} catch (error) {
-  console.log('No saved data found, starting with empty database');
+// Initialize the database schema
+function initializeDatabase() {
+  db.serialize(() => {
+    // Create tables with room support
+    db.run(`CREATE TABLE IF NOT EXISTS rooms (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      password TEXT,
+      is_public INTEGER DEFAULT 1
+    )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS timers (
+      id TEXT PRIMARY KEY,
+      room_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      duration INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      started_at INTEGER DEFAULT NULL,
+      paused_at INTEGER DEFAULT NULL,
+      completed_at INTEGER DEFAULT NULL,
+      status TEXT NOT NULL,
+      FOREIGN KEY (room_id) REFERENCES rooms(id)
+    )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS clients (
+      id TEXT PRIMARY KEY,
+      room_id TEXT,
+      last_seen INTEGER NOT NULL,
+      FOREIGN KEY (room_id) REFERENCES rooms(id)
+    )`);
+
+    // Create a default public room if none exists
+    const now = Math.floor(Date.now() / 1000);
+    db.run(`INSERT OR IGNORE INTO rooms (id, name, created_at, is_public)
+      VALUES ('default', 'Public Room', ?, 1)`, 
+      [now], 
+      function(err) {
+        if (err) {
+          console.error('Error creating default room:', err);
+        } else if (this.changes > 0) {
+          console.log('Default room created');
+        }
+      }
+    );
+  });
+}
+
+// Create a promise-based wrapper for database operations
+function runQuery(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function(err) {
+      if (err) reject(err);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+}
+
+function getOne(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+}
+
+function getAll(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows || []);
+    });
+  });
 }
 
 // Create WebSocket server using the HTTP server (required for WSS on Render.com)
@@ -241,22 +132,33 @@ function broadcastToRoom(roomId, message, excludeClient = null) {
 }
 
 // Handle WebSocket connections
-wss.on('connection', (ws, req) => {
+wss.on('connection', async (ws, req) => {
   // Generate client ID if new connection
   const clientId = crypto.randomUUID();
   clients.set(ws, { id: clientId, roomId: null });
   
   console.log(`Client connected: ${clientId}`);
   
-  // Send available rooms to the newly connected client
-  const publicRooms = db.getPublicRooms('default');
-  ws.send(JSON.stringify({
-    type: 'available_rooms',
-    rooms: publicRooms
-  }));
+  try {
+    // Send available rooms to the newly connected client
+    const publicRooms = await getAll(`
+      SELECT r.id, r.name, r.created_at, r.is_public,
+        (SELECT COUNT(*) FROM clients WHERE clients.room_id = r.id) AS client_count
+      FROM rooms r
+      WHERE r.is_public = 1 OR r.id = ?
+      ORDER BY r.name
+    `, ['default']);
+    
+    ws.send(JSON.stringify({
+      type: 'available_rooms',
+      rooms: publicRooms
+    }));
+  } catch (error) {
+    console.error('Error getting rooms:', error);
+  }
   
   // Handle incoming messages
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     try {
       const message = JSON.parse(data.toString());
       const clientInfo = clients.get(ws);
@@ -268,28 +170,28 @@ wss.on('connection', (ws, req) => {
       
       switch(message.type) {
         case 'join_room':
-          handleJoinRoom(message, ws, clientInfo, now);
+          await handleJoinRoom(message, ws, clientInfo, now);
           break;
         case 'create_room':
-          handleCreateRoom(message, ws, clientInfo, now);
+          await handleCreateRoom(message, ws, clientInfo, now);
           break;
         case 'leave_room':
-          handleLeaveRoom(ws, clientInfo, now);
+          await handleLeaveRoom(ws, clientInfo, now);
           break;
         case 'create_timer':
-          handleCreateTimer(message, ws, clientInfo, now);
+          await handleCreateTimer(message, ws, clientInfo, now);
           break;
         case 'start_timer':
-          handleStartTimer(message, ws, clientInfo);
+          await handleStartTimer(message, ws, clientInfo);
           break;
         case 'pause_timer':
-          handlePauseTimer(message, ws, clientInfo);
+          await handlePauseTimer(message, ws, clientInfo);
           break;
         case 'stop_timer':
-          handleStopTimer(message, ws, clientInfo);
+          await handleStopTimer(message, ws, clientInfo);
           break;
         case 'get_timers':
-          handleGetTimers(message, ws, clientInfo);
+          await handleGetTimers(message, ws, clientInfo);
           break;
         case 'ping':
           ws.send(JSON.stringify({ type: 'pong' }));
@@ -322,49 +224,74 @@ wss.on('connection', (ws, req) => {
 });
 
 // Room handlers
-function handleJoinRoom(message, ws, clientInfo, now) {
+async function handleJoinRoom(message, ws, clientInfo, now) {
   const roomId = message.roomId;
   const password = message.password || null;
   
-  // Verify room exists and password matches (if any)
-  const roomAccess = db.verifyRoomPassword(roomId, password);
-  
-  if (!roomAccess) {
+  try {
+    // Verify room exists and password matches (if any)
+    const roomAccess = await getOne(`
+      SELECT id FROM rooms WHERE id = ? AND (password IS NULL OR password = ?)
+    `, [roomId, password]);
+    
+    if (!roomAccess) {
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Invalid room ID or password'
+      }));
+      return;
+    }
+    
+    // Update client's room
+    clientInfo.roomId = roomId;
+    clients.set(ws, clientInfo);
+    
+    // Update client in database
+    await runQuery(`
+      INSERT INTO clients (id, room_id, last_seen)
+      VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET room_id = excluded.room_id, last_seen = excluded.last_seen
+    `, [clientInfo.id, roomId, now]);
+    
+    // Get room details
+    const room = await getOne(`
+      SELECT * FROM rooms WHERE id = ?
+    `, [roomId]);
+    
+    // Get timers for this room
+    const activeTimers = await getAll(`
+      SELECT * FROM timers 
+      WHERE room_id = ? 
+      ORDER BY created_at DESC
+    `, [roomId]);
+    
+    // Send room joined confirmation with timers
+    ws.send(JSON.stringify({
+      type: 'room_joined',
+      roomId: roomId,
+      room: room,
+      timers: activeTimers
+    }));
+    
+    // Notify other clients in the room
+    broadcastToRoom(roomId, {
+      type: 'client_joined',
+      clientId: clientInfo.id
+    }, ws);
+    
+    console.log(`Client ${clientInfo.id} joined room ${roomId}`);
+    
+  } catch (error) {
+    console.error('Error joining room:', error);
     ws.send(JSON.stringify({
       type: 'error',
-      message: 'Invalid room ID or password'
+      message: 'Failed to join room',
+      error: error.message
     }));
-    return;
   }
-  
-  // Update client's room
-  clientInfo.roomId = roomId;
-  clients.set(ws, clientInfo);
-  
-  // Update client in database
-  db.upsertClient(clientInfo.id, roomId, now);
-  
-  // Get timers for this room
-  const activeTimers = db.getAllTimers(roomId);
-  
-  // Send room joined confirmation with timers
-  ws.send(JSON.stringify({
-    type: 'room_joined',
-    roomId: roomId,
-    room: db.getRoom(roomId),
-    timers: activeTimers
-  }));
-  
-  // Notify other clients in the room
-  broadcastToRoom(roomId, {
-    type: 'client_joined',
-    clientId: clientInfo.id
-  }, ws);
-  
-  console.log(`Client ${clientInfo.id} joined room ${roomId}`);
 }
 
-function handleCreateRoom(message, ws, clientInfo, now) {
+async function handleCreateRoom(message, ws, clientInfo, now) {
   const roomId = crypto.randomUUID();
   const roomName = message.name || 'New Room';
   const isPublic = message.isPublic !== false;
@@ -372,20 +299,21 @@ function handleCreateRoom(message, ws, clientInfo, now) {
   
   try {
     // Create the room
-    const room = db.createRoom(
-      roomId,
-      roomName,
-      now,
-      password,
-      isPublic
-    );
+    await runQuery(`
+      INSERT INTO rooms (id, name, created_at, password, is_public)
+      VALUES (?, ?, ?, ?, ?)
+    `, [roomId, roomName, now, password, isPublic ? 1 : 0]);
     
     // Join the newly created room
     clientInfo.roomId = roomId;
     clients.set(ws, clientInfo);
     
     // Update client in database
-    db.upsertClient(clientInfo.id, roomId, now);
+    await runQuery(`
+      INSERT INTO clients (id, room_id, last_seen)
+      VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET room_id = excluded.room_id, last_seen = excluded.last_seen
+    `, [clientInfo.id, roomId, now]);
     
     // Send confirmation
     ws.send(JSON.stringify({
@@ -394,16 +322,21 @@ function handleCreateRoom(message, ws, clientInfo, now) {
         id: roomId,
         name: roomName,
         created_at: now,
-        is_public: isPublic,
+        is_public: isPublic ? 1 : 0,
         client_count: 1
       }
     }));
+    
+    // Get room details
+    const room = await getOne(`
+      SELECT * FROM rooms WHERE id = ?
+    `, [roomId]);
     
     // Send joined room confirmation
     ws.send(JSON.stringify({
       type: 'room_joined',
       roomId: roomId,
-      room: db.getRoom(roomId),
+      room: room,
       timers: []
     }));
     
@@ -420,43 +353,65 @@ function handleCreateRoom(message, ws, clientInfo, now) {
   }
 }
 
-function handleLeaveRoom(ws, clientInfo, now) {
+async function handleLeaveRoom(ws, clientInfo, now) {
   if (!clientInfo.roomId) {
     return;
   }
   
   const roomId = clientInfo.roomId;
   
-  // Notify other clients in the room
-  broadcastToRoom(roomId, {
-    type: 'client_left',
-    clientId: clientInfo.id
-  }, ws);
-  
-  // Update client
-  clientInfo.roomId = null;
-  clients.set(ws, clientInfo);
-  
-  // Update in database (set room_id to NULL)
-  db.upsertClient(clientInfo.id, null, now);
-  
-  // Send confirmation
-  ws.send(JSON.stringify({
-    type: 'room_left'
-  }));
-  
-  // Send available rooms again
-  const publicRooms = db.getPublicRooms('default');
-  ws.send(JSON.stringify({
-    type: 'available_rooms',
-    rooms: publicRooms
-  }));
-  
-  console.log(`Client ${clientInfo.id} left room ${roomId}`);
+  try {
+    // Notify other clients in the room
+    broadcastToRoom(roomId, {
+      type: 'client_left',
+      clientId: clientInfo.id
+    }, ws);
+    
+    // Update client
+    clientInfo.roomId = null;
+    clients.set(ws, clientInfo);
+    
+    // Update in database (set room_id to NULL)
+    await runQuery(`
+      INSERT INTO clients (id, room_id, last_seen)
+      VALUES (?, NULL, ?)
+      ON CONFLICT(id) DO UPDATE SET room_id = NULL, last_seen = excluded.last_seen
+    `, [clientInfo.id, now]);
+    
+    // Send confirmation
+    ws.send(JSON.stringify({
+      type: 'room_left'
+    }));
+    
+    // Send available rooms again
+    const publicRooms = await getAll(`
+      SELECT r.id, r.name, r.created_at, r.is_public,
+        (SELECT COUNT(*) FROM clients WHERE clients.room_id = r.id) AS client_count
+      FROM rooms r
+      WHERE r.is_public = 1 OR r.id = ?
+      ORDER BY r.name
+    `, ['default']);
+    
+    ws.send(JSON.stringify({
+      type: 'available_rooms',
+      rooms: publicRooms
+    }));
+    
+    console.log(`Client ${clientInfo.id} left room ${roomId}`);
+    
+  } catch (error) {
+    console.error('Error leaving room:', error);
+    
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Failed to leave room',
+      error: error.message
+    }));
+  }
 }
 
 // Timer handlers
-function handleCreateTimer(message, ws, clientInfo, now) {
+async function handleCreateTimer(message, ws, clientInfo, now) {
   // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
@@ -469,19 +424,28 @@ function handleCreateTimer(message, ws, clientInfo, now) {
   const timerId = crypto.randomUUID();
   
   try {
-    const timer = db.createTimer(
+    // Create timer
+    await runQuery(`
+      INSERT INTO timers (id, room_id, name, duration, created_at, status)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [
       timerId,
       clientInfo.roomId,
       message.name || 'Timer',
       message.duration,
       now,
       'created'
-    );
+    ]);
+    
+    // Get timer data
+    const timerData = await getOne(`
+      SELECT * FROM timers WHERE id = ?
+    `, [timerId]);
     
     // Broadcast to all clients in the room
     broadcastToRoom(clientInfo.roomId, {
       type: 'timer_created',
-      timer: timer
+      timer: timerData
     });
     
     console.log(`Timer ${timerId} created in room ${clientInfo.roomId}`);
@@ -497,7 +461,7 @@ function handleCreateTimer(message, ws, clientInfo, now) {
   }
 }
 
-function handleStartTimer(message, ws, clientInfo) {
+async function handleStartTimer(message, ws, clientInfo) {
   // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
@@ -511,7 +475,9 @@ function handleStartTimer(message, ws, clientInfo) {
   
   try {
     // Get the timer to verify it belongs to the client's room
-    const timer = db.getTimer(message.timerId);
+    const timer = await getOne(`
+      SELECT * FROM timers WHERE id = ?
+    `, [message.timerId]);
     
     if (!timer || timer.room_id !== clientInfo.roomId) {
       ws.send(JSON.stringify({
@@ -521,13 +487,20 @@ function handleStartTimer(message, ws, clientInfo) {
       return;
     }
     
-    const updatedTimer = db.updateTimerStatus(
-      message.timerId,
-      'running',
-      now,     // started_at
-      null,    // paused_at
-      null     // completed_at
-    );
+    // Update timer status
+    await runQuery(`
+      UPDATE timers
+      SET status = ?,
+          started_at = ?,
+          paused_at = NULL,
+          completed_at = NULL
+      WHERE id = ?
+    `, ['running', now, message.timerId]);
+    
+    // Get updated timer data
+    const updatedTimer = await getOne(`
+      SELECT * FROM timers WHERE id = ?
+    `, [message.timerId]);
     
     // Broadcast to all clients in the room
     broadcastToRoom(clientInfo.roomId, {
@@ -548,7 +521,7 @@ function handleStartTimer(message, ws, clientInfo) {
   }
 }
 
-function handlePauseTimer(message, ws, clientInfo) {
+async function handlePauseTimer(message, ws, clientInfo) {
   // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
@@ -562,7 +535,9 @@ function handlePauseTimer(message, ws, clientInfo) {
   
   try {
     // Get the timer to verify it belongs to the client's room
-    const timer = db.getTimer(message.timerId);
+    const timer = await getOne(`
+      SELECT * FROM timers WHERE id = ?
+    `, [message.timerId]);
     
     if (!timer || timer.room_id !== clientInfo.roomId) {
       ws.send(JSON.stringify({
@@ -572,13 +547,18 @@ function handlePauseTimer(message, ws, clientInfo) {
       return;
     }
     
-    const updatedTimer = db.updateTimerStatus(
-      message.timerId,
-      'paused',
-      null,    // started_at
-      now,     // paused_at
-      null     // completed_at
-    );
+    // Update timer status
+    await runQuery(`
+      UPDATE timers
+      SET status = ?,
+          paused_at = ?
+      WHERE id = ?
+    `, ['paused', now, message.timerId]);
+    
+    // Get updated timer data
+    const updatedTimer = await getOne(`
+      SELECT * FROM timers WHERE id = ?
+    `, [message.timerId]);
     
     // Broadcast to all clients in the room
     broadcastToRoom(clientInfo.roomId, {
@@ -599,7 +579,7 @@ function handlePauseTimer(message, ws, clientInfo) {
   }
 }
 
-function handleStopTimer(message, ws, clientInfo) {
+async function handleStopTimer(message, ws, clientInfo) {
   // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
@@ -613,7 +593,9 @@ function handleStopTimer(message, ws, clientInfo) {
   
   try {
     // Get the timer to verify it belongs to the client's room
-    const timer = db.getTimer(message.timerId);
+    const timer = await getOne(`
+      SELECT * FROM timers WHERE id = ?
+    `, [message.timerId]);
     
     if (!timer || timer.room_id !== clientInfo.roomId) {
       ws.send(JSON.stringify({
@@ -623,13 +605,18 @@ function handleStopTimer(message, ws, clientInfo) {
       return;
     }
     
-    const updatedTimer = db.updateTimerStatus(
-      message.timerId,
-      'completed',
-      null,    // started_at
-      null,    // paused_at
-      now      // completed_at
-    );
+    // Update timer status
+    await runQuery(`
+      UPDATE timers
+      SET status = ?,
+          completed_at = ?
+      WHERE id = ?
+    `, ['completed', now, message.timerId]);
+    
+    // Get updated timer data
+    const updatedTimer = await getOne(`
+      SELECT * FROM timers WHERE id = ?
+    `, [message.timerId]);
     
     // Broadcast to all clients in the room
     broadcastToRoom(clientInfo.roomId, {
@@ -650,7 +637,7 @@ function handleStopTimer(message, ws, clientInfo) {
   }
 }
 
-function handleGetTimers(message, ws, clientInfo) {
+async function handleGetTimers(message, ws, clientInfo) {
   // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
@@ -661,7 +648,11 @@ function handleGetTimers(message, ws, clientInfo) {
   }
   
   try {
-    const timers = db.getAllTimers(clientInfo.roomId);
+    const timers = await getAll(`
+      SELECT * FROM timers 
+      WHERE room_id = ? 
+      ORDER BY created_at DESC
+    `, [clientInfo.roomId]);
     
     ws.send(JSON.stringify({
       type: 'timer_list',
@@ -679,40 +670,30 @@ function handleGetTimers(message, ws, clientInfo) {
   }
 }
 
-// Periodically save data (optional, for persistence between restarts)
-function saveData() {
-  try {
-    db.saveToFile(dataPath);
-    console.log('Data saved successfully');
-  } catch (error) {
-    console.error('Error saving data:', error);
-  }
-}
-
 // Start the server by listening on the specified port
 server.listen(PORT, () => {
   console.log(`Room-based Timer WebSocket server running on port ${PORT}`);
 });
 
 // Cleanup old clients periodically (every 5 minutes)
-setInterval(() => {
+setInterval(async () => {
   const cutoff = Math.floor(Date.now() / 1000) - 3600; // 1 hour
-  db.cleanupInactiveClients(cutoff);
-  console.log('Cleaned up inactive clients');
   
-  // Save data after cleanup
-  saveData();
+  try {
+    const result = await runQuery('DELETE FROM clients WHERE last_seen < ?', [cutoff]);
+    console.log(`Cleaned up ${result.changes} inactive clients`);
+  } catch (error) {
+    console.error('Error cleaning up clients:', error);
+  }
 }, 5 * 60 * 1000);
 
-// Save data on process termination
+// Close database connection when the server is shutting down
 process.on('SIGINT', () => {
-  console.log('Saving data before shutdown...');
-  saveData();
-  process.exit();
+  db.close();
+  process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('Saving data before shutdown...');
-  saveData();
-  process.exit();
+  db.close();
+  process.exit(0);
 });
