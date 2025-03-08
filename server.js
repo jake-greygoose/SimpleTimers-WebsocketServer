@@ -131,11 +131,43 @@ function broadcastToRoom(roomId, message, excludeClient = null) {
   });
 }
 
+// Specialized broadcast function for timer updates
+function broadcastTimerUpdate(roomId, message, excludeClient = null) {
+  const messageStr = JSON.stringify(message);
+  const timerId = message.timer ? message.timer.id : null;
+  
+  wss.clients.forEach(client => {
+    const clientInfo = clients.get(client);
+    
+    // Skip if:
+    // 1. It's the excluded client
+    // 2. Not in the same room
+    // 3. Not in open state
+    if (client === excludeClient || 
+        !clientInfo || 
+        clientInfo.roomId !== roomId || 
+        client.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    
+    // For timer updates, check subscription
+    if (timerId && 
+        message.type.startsWith('timer_') && 
+        clientInfo.subscribedTimers.size > 0 && 
+        !clientInfo.subscribedTimers.has(timerId)) {
+      // Not subscribed to this timer, and client has active subscriptions
+      return;
+    }
+    
+    client.send(messageStr);
+  });
+}
+
 // Handle WebSocket connections
 wss.on('connection', async (ws, req) => {
   // Generate client ID if new connection
   const clientId = crypto.randomUUID();
-  clients.set(ws, { id: clientId, roomId: null });
+  clients.set(ws, { id: clientId, roomId: null, subscribedTimers: new Set() });
   
   console.log(`Client connected: ${clientId}`);
   
@@ -192,6 +224,12 @@ wss.on('connection', async (ws, req) => {
           break;
         case 'get_timers':
           await handleGetTimers(message, ws, clientInfo);
+          break;
+        case 'subscribe_to_timer':
+          await handleSubscribeToTimer(message, ws, clientInfo);
+          break;
+        case 'unsubscribe_from_timer':
+          await handleUnsubscribeFromTimer(message, ws, clientInfo);
           break;
         case 'ping':
           ws.send(JSON.stringify({ type: 'pong' }));
@@ -443,7 +481,7 @@ async function handleCreateTimer(message, ws, clientInfo, now) {
     `, [timerId]);
     
     // Broadcast to all clients in the room
-    broadcastToRoom(clientInfo.roomId, {
+    broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_created',
       timer: timerData
     });
@@ -503,7 +541,7 @@ async function handleStartTimer(message, ws, clientInfo) {
     `, [message.timerId]);
     
     // Broadcast to all clients in the room
-    broadcastToRoom(clientInfo.roomId, {
+    broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_started',
       timer: updatedTimer
     });
@@ -561,7 +599,7 @@ async function handlePauseTimer(message, ws, clientInfo) {
     `, [message.timerId]);
     
     // Broadcast to all clients in the room
-    broadcastToRoom(clientInfo.roomId, {
+    broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_paused',
       timer: updatedTimer
     });
@@ -619,7 +657,7 @@ async function handleStopTimer(message, ws, clientInfo) {
     `, [message.timerId]);
     
     // Broadcast to all clients in the room
-    broadcastToRoom(clientInfo.roomId, {
+    broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_completed',
       timer: updatedTimer
     });
@@ -665,6 +703,88 @@ async function handleGetTimers(message, ws, clientInfo) {
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to get timers',
+      error: error.message
+    }));
+  }
+}
+
+async function handleSubscribeToTimer(message, ws, clientInfo) {
+  const timerId = message.timerId;
+  
+  if (!timerId) {
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Missing timer ID'
+    }));
+    return;
+  }
+  
+  try {
+    // Verify timer exists in the client's room
+    const timer = await getOne(`
+      SELECT * FROM timers 
+      WHERE id = ? AND room_id = ?
+    `, [timerId, clientInfo.roomId]);
+    
+    if (!timer) {
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Timer not found in your room'
+      }));
+      return;
+    }
+    
+    // Add to subscribed timers
+    clientInfo.subscribedTimers.add(timerId);
+    
+    // Confirm subscription
+    ws.send(JSON.stringify({
+      type: 'timer_subscribed',
+      timerId: timerId
+    }));
+    
+    console.log(`Client ${clientInfo.id} subscribed to timer ${timerId}`);
+    
+  } catch (error) {
+    console.error('Error subscribing to timer:', error);
+    
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Failed to subscribe to timer',
+      error: error.message
+    }));
+  }
+}
+
+async function handleUnsubscribeFromTimer(message, ws, clientInfo) {
+  const timerId = message.timerId;
+  
+  if (!timerId) {
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Missing timer ID'
+    }));
+    return;
+  }
+  
+  try {
+    // Remove from subscribed timers
+    clientInfo.subscribedTimers.delete(timerId);
+    
+    // Confirm unsubscription
+    ws.send(JSON.stringify({
+      type: 'timer_unsubscribed',
+      timerId: timerId
+    }));
+    
+    console.log(`Client ${clientInfo.id} unsubscribed from timer ${timerId}`);
+    
+  } catch (error) {
+    console.error('Error unsubscribing from timer:', error);
+    
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Failed to unsubscribe from timer',
       error: error.message
     }));
   }
