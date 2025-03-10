@@ -116,6 +116,22 @@ const wss = new WebSocket.Server({ server });
 // Clients collection
 const clients = new Map();
 
+// Global keep-alive ping interval
+const interval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      console.log('Terminating dead client');
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(interval);
+});
+
 // Broadcast to all clients in a specific room
 function broadcastToRoom(roomId, message, excludeClient = null) {
   const messageStr = JSON.stringify(message);
@@ -139,10 +155,6 @@ function broadcastTimerUpdate(roomId, message, excludeClient = null) {
   wss.clients.forEach(client => {
     const clientInfo = clients.get(client);
     
-    // Skip if:
-    // 1. It's the excluded client
-    // 2. Not in the same room
-    // 3. Not in open state
     if (client === excludeClient || 
         !clientInfo || 
         clientInfo.roomId !== roomId || 
@@ -150,12 +162,10 @@ function broadcastTimerUpdate(roomId, message, excludeClient = null) {
       return;
     }
     
-    // For timer updates, check subscription
     if (timerId && 
         message.type.startsWith('timer_') && 
         clientInfo.subscribedTimers.size > 0 && 
         !clientInfo.subscribedTimers.has(timerId)) {
-      // Not subscribed to this timer, and client has active subscriptions
       return;
     }
     
@@ -165,7 +175,13 @@ function broadcastTimerUpdate(roomId, message, excludeClient = null) {
 
 // Handle WebSocket connections
 wss.on('connection', async (ws, req) => {
-  // Generate client ID if new connection
+  // Set up heartbeat mechanism
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
+  // Generate client ID for new connection
   const clientId = crypto.randomUUID();
   clients.set(ws, { id: clientId, roomId: null, subscribedTimers: new Set() });
   
@@ -242,13 +258,12 @@ wss.on('connection', async (ws, req) => {
     }
   });
   
-  // Handle disconnection
-  ws.on('close', () => {
+  // Handle disconnection with cleanup
+  ws.on('close', async () => {
     const clientInfo = clients.get(ws);
     if (clientInfo) {
       console.log(`Client disconnected: ${clientInfo.id}`);
       
-      // Notify other clients in the room about this client leaving
       if (clientInfo.roomId) {
         broadcastToRoom(clientInfo.roomId, {
           type: 'client_left',
@@ -257,6 +272,13 @@ wss.on('connection', async (ws, req) => {
       }
       
       clients.delete(ws);
+      
+      // Immediately remove client entry from database upon disconnect
+      try {
+        await runQuery(`DELETE FROM clients WHERE id = ?`, [clientInfo.id]);
+      } catch (err) {
+        console.error(`Error deleting client ${clientInfo.id} from database:`, err);
+      }
     }
   });
 });
@@ -267,7 +289,6 @@ async function handleJoinRoom(message, ws, clientInfo, now) {
   const password = message.password || null;
   
   try {
-    // Verify room exists and password matches (if any)
     const roomAccess = await getOne(`
       SELECT id FROM rooms WHERE id = ? AND (password IS NULL OR password = ?)
     `, [roomId, password]);
@@ -280,30 +301,18 @@ async function handleJoinRoom(message, ws, clientInfo, now) {
       return;
     }
     
-    // Update client's room
     clientInfo.roomId = roomId;
     clients.set(ws, clientInfo);
     
-    // Update client in database
     await runQuery(`
       INSERT INTO clients (id, room_id, last_seen)
       VALUES (?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET room_id = excluded.room_id, last_seen = excluded.last_seen
     `, [clientInfo.id, roomId, now]);
     
-    // Get room details
-    const room = await getOne(`
-      SELECT * FROM rooms WHERE id = ?
-    `, [roomId]);
+    const room = await getOne(`SELECT * FROM rooms WHERE id = ?`, [roomId]);
+    const activeTimers = await getAll(`SELECT * FROM timers WHERE room_id = ? ORDER BY created_at DESC`, [roomId]);
     
-    // Get timers for this room
-    const activeTimers = await getAll(`
-      SELECT * FROM timers 
-      WHERE room_id = ? 
-      ORDER BY created_at DESC
-    `, [roomId]);
-    
-    // Send room joined confirmation with timers
     ws.send(JSON.stringify({
       type: 'room_joined',
       roomId: roomId,
@@ -311,7 +320,6 @@ async function handleJoinRoom(message, ws, clientInfo, now) {
       timers: activeTimers
     }));
     
-    // Notify other clients in the room
     broadcastToRoom(roomId, {
       type: 'client_joined',
       clientId: clientInfo.id
@@ -336,24 +344,20 @@ async function handleCreateRoom(message, ws, clientInfo, now) {
   const password = message.password || null;
   
   try {
-    // Create the room
     await runQuery(`
       INSERT INTO rooms (id, name, created_at, password, is_public)
       VALUES (?, ?, ?, ?, ?)
     `, [roomId, roomName, now, password, isPublic ? 1 : 0]);
     
-    // Join the newly created room
     clientInfo.roomId = roomId;
     clients.set(ws, clientInfo);
     
-    // Update client in database
     await runQuery(`
       INSERT INTO clients (id, room_id, last_seen)
       VALUES (?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET room_id = excluded.room_id, last_seen = excluded.last_seen
     `, [clientInfo.id, roomId, now]);
     
-    // Send confirmation
     ws.send(JSON.stringify({
       type: 'room_created',
       room: {
@@ -365,12 +369,8 @@ async function handleCreateRoom(message, ws, clientInfo, now) {
       }
     }));
     
-    // Get room details
-    const room = await getOne(`
-      SELECT * FROM rooms WHERE id = ?
-    `, [roomId]);
+    const room = await getOne(`SELECT * FROM rooms WHERE id = ?`, [roomId]);
     
-    // Send joined room confirmation
     ws.send(JSON.stringify({
       type: 'room_joined',
       roomId: roomId,
@@ -382,7 +382,6 @@ async function handleCreateRoom(message, ws, clientInfo, now) {
     
   } catch (error) {
     console.error('Error creating room:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to create room',
@@ -392,36 +391,27 @@ async function handleCreateRoom(message, ws, clientInfo, now) {
 }
 
 async function handleLeaveRoom(ws, clientInfo, now) {
-  if (!clientInfo.roomId) {
-    return;
-  }
+  if (!clientInfo.roomId) return;
   
   const roomId = clientInfo.roomId;
   
   try {
-    // Notify other clients in the room
     broadcastToRoom(roomId, {
       type: 'client_left',
       clientId: clientInfo.id
     }, ws);
     
-    // Update client
     clientInfo.roomId = null;
     clients.set(ws, clientInfo);
     
-    // Update in database (set room_id to NULL)
     await runQuery(`
       INSERT INTO clients (id, room_id, last_seen)
       VALUES (?, NULL, ?)
       ON CONFLICT(id) DO UPDATE SET room_id = NULL, last_seen = excluded.last_seen
     `, [clientInfo.id, now]);
     
-    // Send confirmation
-    ws.send(JSON.stringify({
-      type: 'room_left'
-    }));
+    ws.send(JSON.stringify({ type: 'room_left' }));
     
-    // Send available rooms again
     const publicRooms = await getAll(`
       SELECT r.id, r.name, r.created_at, r.is_public,
         (SELECT COUNT(*) FROM clients WHERE clients.room_id = r.id) AS client_count
@@ -439,7 +429,6 @@ async function handleLeaveRoom(ws, clientInfo, now) {
     
   } catch (error) {
     console.error('Error leaving room:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to leave room',
@@ -448,9 +437,7 @@ async function handleLeaveRoom(ws, clientInfo, now) {
   }
 }
 
-// Timer handlers
 async function handleCreateTimer(message, ws, clientInfo, now) {
-  // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
       type: 'error',
@@ -462,7 +449,6 @@ async function handleCreateTimer(message, ws, clientInfo, now) {
   const timerId = crypto.randomUUID();
   
   try {
-    // Create timer
     await runQuery(`
       INSERT INTO timers (id, room_id, name, duration, created_at, status)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -475,12 +461,8 @@ async function handleCreateTimer(message, ws, clientInfo, now) {
       'created'
     ]);
     
-    // Get timer data
-    const timerData = await getOne(`
-      SELECT * FROM timers WHERE id = ?
-    `, [timerId]);
+    const timerData = await getOne(`SELECT * FROM timers WHERE id = ?`, [timerId]);
     
-    // Broadcast to all clients in the room
     broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_created',
       timer: timerData
@@ -490,7 +472,6 @@ async function handleCreateTimer(message, ws, clientInfo, now) {
     
   } catch (error) {
     console.error('Error creating timer:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to create timer',
@@ -500,7 +481,6 @@ async function handleCreateTimer(message, ws, clientInfo, now) {
 }
 
 async function handleStartTimer(message, ws, clientInfo) {
-  // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
       type: 'error',
@@ -512,10 +492,7 @@ async function handleStartTimer(message, ws, clientInfo) {
   const now = Math.floor(Date.now() / 1000);
   
   try {
-    // Get the timer to verify it belongs to the client's room
-    const timer = await getOne(`
-      SELECT * FROM timers WHERE id = ?
-    `, [message.timerId]);
+    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
     
     if (!timer || timer.room_id !== clientInfo.roomId) {
       ws.send(JSON.stringify({
@@ -525,22 +502,14 @@ async function handleStartTimer(message, ws, clientInfo) {
       return;
     }
     
-    // Update timer status
     await runQuery(`
       UPDATE timers
-      SET status = ?,
-          started_at = ?,
-          paused_at = NULL,
-          completed_at = NULL
+      SET status = ?, started_at = ?, paused_at = NULL, completed_at = NULL
       WHERE id = ?
     `, ['running', now, message.timerId]);
     
-    // Get updated timer data
-    const updatedTimer = await getOne(`
-      SELECT * FROM timers WHERE id = ?
-    `, [message.timerId]);
+    const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
     
-    // Broadcast to all clients in the room
     broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_started',
       timer: updatedTimer
@@ -550,7 +519,6 @@ async function handleStartTimer(message, ws, clientInfo) {
     
   } catch (error) {
     console.error('Error starting timer:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to start timer',
@@ -560,7 +528,6 @@ async function handleStartTimer(message, ws, clientInfo) {
 }
 
 async function handlePauseTimer(message, ws, clientInfo) {
-  // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
       type: 'error',
@@ -572,10 +539,7 @@ async function handlePauseTimer(message, ws, clientInfo) {
   const now = Math.floor(Date.now() / 1000);
   
   try {
-    // Get the timer to verify it belongs to the client's room
-    const timer = await getOne(`
-      SELECT * FROM timers WHERE id = ?
-    `, [message.timerId]);
+    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
     
     if (!timer || timer.room_id !== clientInfo.roomId) {
       ws.send(JSON.stringify({
@@ -585,20 +549,14 @@ async function handlePauseTimer(message, ws, clientInfo) {
       return;
     }
     
-    // Update timer status
     await runQuery(`
       UPDATE timers
-      SET status = ?,
-          paused_at = ?
+      SET status = ?, paused_at = ?
       WHERE id = ?
     `, ['paused', now, message.timerId]);
     
-    // Get updated timer data
-    const updatedTimer = await getOne(`
-      SELECT * FROM timers WHERE id = ?
-    `, [message.timerId]);
+    const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
     
-    // Broadcast to all clients in the room
     broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_paused',
       timer: updatedTimer
@@ -608,7 +566,6 @@ async function handlePauseTimer(message, ws, clientInfo) {
     
   } catch (error) {
     console.error('Error pausing timer:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to pause timer',
@@ -618,7 +575,6 @@ async function handlePauseTimer(message, ws, clientInfo) {
 }
 
 async function handleStopTimer(message, ws, clientInfo) {
-  // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
       type: 'error',
@@ -630,10 +586,7 @@ async function handleStopTimer(message, ws, clientInfo) {
   const now = Math.floor(Date.now() / 1000);
   
   try {
-    // Get the timer to verify it belongs to the client's room
-    const timer = await getOne(`
-      SELECT * FROM timers WHERE id = ?
-    `, [message.timerId]);
+    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
     
     if (!timer || timer.room_id !== clientInfo.roomId) {
       ws.send(JSON.stringify({
@@ -643,20 +596,14 @@ async function handleStopTimer(message, ws, clientInfo) {
       return;
     }
     
-    // Update timer status
     await runQuery(`
       UPDATE timers
-      SET status = ?,
-          completed_at = ?
+      SET status = ?, completed_at = ?
       WHERE id = ?
     `, ['completed', now, message.timerId]);
     
-    // Get updated timer data
-    const updatedTimer = await getOne(`
-      SELECT * FROM timers WHERE id = ?
-    `, [message.timerId]);
+    const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
     
-    // Broadcast to all clients in the room
     broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_completed',
       timer: updatedTimer
@@ -666,7 +613,6 @@ async function handleStopTimer(message, ws, clientInfo) {
     
   } catch (error) {
     console.error('Error stopping timer:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to stop timer',
@@ -676,7 +622,6 @@ async function handleStopTimer(message, ws, clientInfo) {
 }
 
 async function handleGetTimers(message, ws, clientInfo) {
-  // Check if client is in a room
   if (!clientInfo.roomId) {
     ws.send(JSON.stringify({
       type: 'error',
@@ -686,11 +631,7 @@ async function handleGetTimers(message, ws, clientInfo) {
   }
   
   try {
-    const timers = await getAll(`
-      SELECT * FROM timers 
-      WHERE room_id = ? 
-      ORDER BY created_at DESC
-    `, [clientInfo.roomId]);
+    const timers = await getAll(`SELECT * FROM timers WHERE room_id = ? ORDER BY created_at DESC`, [clientInfo.roomId]);
     
     ws.send(JSON.stringify({
       type: 'timer_list',
@@ -699,7 +640,6 @@ async function handleGetTimers(message, ws, clientInfo) {
     
   } catch (error) {
     console.error('Error getting timers:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to get timers',
@@ -720,11 +660,7 @@ async function handleSubscribeToTimer(message, ws, clientInfo) {
   }
   
   try {
-    // Verify timer exists in the client's room
-    const timer = await getOne(`
-      SELECT * FROM timers 
-      WHERE id = ? AND room_id = ?
-    `, [timerId, clientInfo.roomId]);
+    const timer = await getOne(`SELECT * FROM timers WHERE id = ? AND room_id = ?`, [timerId, clientInfo.roomId]);
     
     if (!timer) {
       ws.send(JSON.stringify({
@@ -734,10 +670,8 @@ async function handleSubscribeToTimer(message, ws, clientInfo) {
       return;
     }
     
-    // Add to subscribed timers
     clientInfo.subscribedTimers.add(timerId);
     
-    // Confirm subscription
     ws.send(JSON.stringify({
       type: 'timer_subscribed',
       timerId: timerId
@@ -747,7 +681,6 @@ async function handleSubscribeToTimer(message, ws, clientInfo) {
     
   } catch (error) {
     console.error('Error subscribing to timer:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to subscribe to timer',
@@ -768,10 +701,8 @@ async function handleUnsubscribeFromTimer(message, ws, clientInfo) {
   }
   
   try {
-    // Remove from subscribed timers
     clientInfo.subscribedTimers.delete(timerId);
     
-    // Confirm unsubscription
     ws.send(JSON.stringify({
       type: 'timer_unsubscribed',
       timerId: timerId
@@ -781,7 +712,6 @@ async function handleUnsubscribeFromTimer(message, ws, clientInfo) {
     
   } catch (error) {
     console.error('Error unsubscribing from timer:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to unsubscribe from timer',
