@@ -110,6 +110,39 @@ function getAll(sql, params = []) {
   });
 }
 
+/**
+ * Helper function to calculate the current state of a timer.
+ * Computes the remaining time based on the timer's status and timestamps.
+ */
+function calculateCurrentTimerState(timer) {
+  const now = Math.floor(Date.now() / 1000);
+  let remaining = timer.duration;
+
+  switch (timer.status) {
+    case 'running':
+      remaining = Math.max(0, timer.duration - (now - timer.started_at));
+      if (remaining === 0) {
+        timer.status = 'completed';
+        timer.completed_at = timer.started_at + timer.duration;
+      }
+      break;
+    case 'paused':
+      remaining = Math.max(0, timer.duration - (timer.paused_at - timer.started_at));
+      break;
+    case 'completed':
+      remaining = 0;
+      break;
+    default:
+      remaining = timer.duration;
+  }
+
+  return {
+    ...timer,
+    remaining,
+    current_server_time: now
+  };
+}
+
 // Create WebSocket server using the HTTP server (required for WSS on Render.com)
 const wss = new WebSocket.Server({ server });
 
@@ -284,6 +317,8 @@ wss.on('connection', async (ws, req) => {
 });
 
 // Room handlers
+
+// Updated handleJoinRoom to calculate and send accurate timer states
 async function handleJoinRoom(message, ws, clientInfo, now) {
   const roomId = message.roomId;
   const password = message.password || null;
@@ -313,11 +348,14 @@ async function handleJoinRoom(message, ws, clientInfo, now) {
     const room = await getOne(`SELECT * FROM rooms WHERE id = ?`, [roomId]);
     const activeTimers = await getAll(`SELECT * FROM timers WHERE room_id = ? ORDER BY created_at DESC`, [roomId]);
     
+    // Calculate exact timer states
+    const timersWithExactStates = activeTimers.map(calculateCurrentTimerState);
+    
     ws.send(JSON.stringify({
       type: 'room_joined',
       roomId: roomId,
       room: room,
-      timers: activeTimers
+      timers: timersWithExactStates
     }));
     
     broadcastToRoom(roomId, {
@@ -463,9 +501,10 @@ async function handleCreateTimer(message, ws, clientInfo, now) {
     
     const timerData = await getOne(`SELECT * FROM timers WHERE id = ?`, [timerId]);
     
+    // Include exact timer state when broadcasting timer creation
     broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_created',
-      timer: timerData
+      timer: calculateCurrentTimerState(timerData)
     });
     
     console.log(`Timer ${timerId} created in room ${clientInfo.roomId}`);
@@ -512,7 +551,7 @@ async function handleStartTimer(message, ws, clientInfo) {
     
     broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_started',
-      timer: updatedTimer
+      timer: calculateCurrentTimerState(updatedTimer)
     });
     
     console.log(`Timer ${message.timerId} started in room ${clientInfo.roomId}`);
@@ -559,7 +598,7 @@ async function handlePauseTimer(message, ws, clientInfo) {
     
     broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_paused',
-      timer: updatedTimer
+      timer: calculateCurrentTimerState(updatedTimer)
     });
     
     console.log(`Timer ${message.timerId} paused in room ${clientInfo.roomId}`);
@@ -606,7 +645,7 @@ async function handleStopTimer(message, ws, clientInfo) {
     
     broadcastTimerUpdate(clientInfo.roomId, {
       type: 'timer_completed',
-      timer: updatedTimer
+      timer: calculateCurrentTimerState(updatedTimer)
     });
     
     console.log(`Timer ${message.timerId} stopped in room ${clientInfo.roomId}`);
@@ -633,9 +672,12 @@ async function handleGetTimers(message, ws, clientInfo) {
   try {
     const timers = await getAll(`SELECT * FROM timers WHERE room_id = ? ORDER BY created_at DESC`, [clientInfo.roomId]);
     
+    // Calculate current states for each timer
+    const timersWithExactStates = timers.map(calculateCurrentTimerState);
+    
     ws.send(JSON.stringify({
       type: 'timer_list',
-      timers: timers
+      timers: timersWithExactStates
     }));
     
   } catch (error) {
