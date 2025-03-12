@@ -43,6 +43,16 @@ function initializeDatabase() {
     // Enable WAL Mode
     db.exec("PRAGMA journal_mode = WAL;");
 
+    db.run("ALTER TABLE rooms ADD COLUMN invite_token TEXT", (err) => {
+    if (err) {
+      console.error("Failed adding invite_token column:", err);
+      return;
+    }
+    db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_invite_token ON rooms(invite_token)", (err) => {
+      if (err) console.error("Failed creating unique index:", err);
+      else console.log("Successfully added invite_token with UNIQUE constraint.");
+    });
+
     // Create tables with secure password hashing and invite tokens
     db.run(`CREATE TABLE IF NOT EXISTS rooms (
       id TEXT PRIMARY KEY,
