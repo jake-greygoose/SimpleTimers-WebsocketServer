@@ -39,21 +39,10 @@ const db = new sqlite3.Database(dbPath, (err) => {
 // Initialize the database schema
 function initializeDatabase() {
   db.serialize(() => {
-
     // Enable WAL Mode
     db.exec("PRAGMA journal_mode = WAL;");
 
-    db.run("ALTER TABLE rooms ADD COLUMN invite_token TEXT", (err) => {
-    if (err) {
-      console.error("Failed adding invite_token column:", err);
-      return;
-    }
-    db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_invite_token ON rooms(invite_token)", (err) => {
-      if (err) console.error("Failed creating unique index:", err);
-      else console.log("Successfully added invite_token with UNIQUE constraint.");
-    });
-
-    // Create tables with secure password hashing and invite tokens
+    // Create rooms table
     db.run(`CREATE TABLE IF NOT EXISTS rooms (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -63,6 +52,7 @@ function initializeDatabase() {
       invite_token TEXT UNIQUE
     )`);
 
+    // Create timers table
     db.run(`CREATE TABLE IF NOT EXISTS timers (
       id TEXT PRIMARY KEY,
       room_id TEXT NOT NULL,
@@ -76,6 +66,7 @@ function initializeDatabase() {
       FOREIGN KEY (room_id) REFERENCES rooms(id)
     )`);
 
+    // Create clients table
     db.run(`CREATE TABLE IF NOT EXISTS clients (
       id TEXT PRIMARY KEY,
       room_id TEXT,
@@ -336,85 +327,101 @@ wss.on('connection', async (ws, req) => {
 // Room handlers
 
 async function handleJoinRoom(message, ws, clientInfo, now) {
-  const bcrypt = require('bcrypt');
-
   const roomId = message.roomId;
   const providedPassword = message.password || null;
   const providedInviteToken = message.inviteToken || null;
 
-  const room = await getOne(`SELECT * FROM rooms WHERE id = ?`, [roomId]);
+  try {
+    const room = await getOne(`SELECT * FROM rooms WHERE id = ?`, [roomId]);
 
-  if (!room) {
-    ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
-    return;
+    if (!room) {
+      return ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+    }
+
+    let accessGranted = room.is_public;
+
+    if (!accessGranted && room.password_hash && providedPassword) {
+      accessGranted = await bcrypt.compare(providedPassword, room.password_hash);
+    }
+
+    if (!accessGranted && providedInviteToken && providedInviteToken === room.invite_token) {
+      accessGranted = true;
+    }
+
+    if (!accessGranted) {
+      return ws.send(JSON.stringify({ type: 'error', message: 'Invalid credentials or invite token' }));
+    }
+
+    clientInfo.roomId = roomId;
+    clients.set(ws, clientInfo);
+
+    await runQuery(`
+      INSERT INTO clients (id, room_id, last_seen)
+      VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET room_id = excluded.room_id, last_seen = excluded.last_seen
+    `, [clientInfo.id, roomId, now]);
+
+    const activeTimers = await getAll(`SELECT * FROM timers WHERE room_id = ?`, [roomId]);
+    const timersWithStates = activeTimers.map(calculateCurrentTimerState);
+
+    ws.send(JSON.stringify({
+      type: 'room_joined',
+      roomId: roomId,
+      room: room,
+      timers: timersWithStates
+    }));
+
+  } catch (error) {
+    console.error('Error joining room:', error);
+    ws.send(JSON.stringify({
+      type: 'error', 
+      message: 'Failed to join room',
+      details: error.message
+    }));
   }
-
-  let accessGranted = room.is_public;
-
-  if (!accessGranted && room.password_hash && providedPassword) {
-    accessGranted = await bcrypt.compare(providedPassword, room.password_hash);
-  }
-
-  if (!accessGranted && providedInviteToken && providedInviteToken === room.invite_token) {
-    accessGranted = true;
-  }
-
-  if (!accessGranted) {
-    ws.send(JSON.stringify({ type: 'error', message: 'Invalid credentials or invite token' }));
-    return;
-  }
-
-  clientInfo.roomId = roomId;
-  clients.set(ws, clientInfo);
-
-  await runQuery(`
-    INSERT INTO clients (id, room_id, last_seen)
-    VALUES (?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET room_id = excluded.room_id, last_seen = excluded.last_seen
-  `, [clientInfo.id, roomId, now]);
-
-  const activeTimers = await getAll(`SELECT * FROM timers WHERE room_id = ?`, [roomId]);
-  const timersWithStates = activeTimers.map(calculateCurrentTimerState);
-
-  ws.send(JSON.stringify({
-    type: 'room_joined',
-    roomId: roomId,
-    room: room,
-    timers: timersWithExactStates
-  }));
 }
 
 async function handleCreateRoom(message, ws, clientInfo, now) {
-  const bcrypt = require('bcrypt');
-
   const roomId = crypto.randomUUID();
   const inviteToken = crypto.randomUUID();
   const roomName = message.name || 'New Room';
   const isPublic = message.isPublic !== false;
   let hashedPassword = null;
 
-  if (message.password) {
-    hashedPassword = await bcrypt.hash(message.password, 10);
-  }
+  try {
+    if (message.password) {
+      hashedPassword = await bcrypt.hash(message.password, 10);
+    }
 
-  await runQuery(`
-    INSERT INTO rooms (id, name, created_at, password, is_public, invite_token)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `, [roomId, roomName, now, hashedPassword, isPublic ? 1 : 0, inviteToken]);
+    await runQuery(`
+      INSERT INTO rooms (id, name, created_at, password_hash, is_public, invite_token)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [roomId, roomName, now, hashedPassword, isPublic ? 1 : 0, inviteToken]);
 
-  clientInfo.roomId = roomId;
-  clients.set(ws, clientInfo);
+    clientInfo.roomId = roomId;
+    clients.set(ws, clientInfo);
 
-  ws.send(JSON.stringify({
-    type: 'room_created',
-    room: {
-      id: roomId,
-      name: roomName,
-      created_at: now,
-      is_public: isPublic ? 1 : 0,
-      invite_token: inviteToken
+    ws.send(JSON.stringify({
+      type: 'room_created',
+      room: {
+        id: roomId,
+        name: roomName,
+        created_at: now,
+        is_public: isPublic ? 1 : 0,
+        invite_token: inviteToken
+      }
     }));
+
+  } catch (error) {
+    console.error('Error creating room:', error);
+    ws.send(JSON.stringify({
+      type: 'error', 
+      message: 'Failed to create room',
+      details: error.message
+    }));
+  }
 }
+  
 async function handleLeaveRoom(ws, clientInfo, now) {
   if (!clientInfo.roomId) return;
   
