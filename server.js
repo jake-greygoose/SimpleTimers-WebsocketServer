@@ -15,19 +15,19 @@ const server = http.createServer((req, res) => {
 const PORT = process.env.PORT || 8080;
 
 // Ensure tmp directory exists for Render.com
-const dbDir = process.env.NODE_ENV === 'production' ? '/tmp' : './data';
+const dbDir = '/data';
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
 // Configure database path that works on Render.com
 const dbPath = path.join(dbDir, 'timer_app.db');
-console.log(`Using database at: ${dbPath}`);
+console.log(`Using persistent database at: ${dbPath}`);
 
 // Initialize SQLite database
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
-    console.error('Database opening error: ', err);
+    console.error('Database opening error:', err);
   } else {
     console.log('Connected to SQLite database');
     initializeDatabase();
@@ -37,6 +37,16 @@ const db = new sqlite3.Database(dbPath, (err) => {
 // Initialize the database schema
 function initializeDatabase() {
   db.serialize(() => {
+
+    // Enable WAL Mode
+    db.exec("PRAGMA journal_mode = WAL;", (err) => {
+      if (err) {
+        console.error('Error enabling WAL mode:', err);
+      } else {
+        console.log('SQLite WAL mode enabled.');
+      }
+    });
+    
     // Create tables with room support
     db.run(`CREATE TABLE IF NOT EXISTS rooms (
       id TEXT PRIMARY KEY,
