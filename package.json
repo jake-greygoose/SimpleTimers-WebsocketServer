@@ -10,10 +10,11 @@
   "engines": {
     "node": ">=16.0.0"
   },
-  "dependencies": {
-    "sqlite3": "^5.1.6",
-    "ws": "^8.14.2"
-  },
+"dependencies": {
+  "sqlite3": "^5.1.6",
+  "ws": "^8.14.2",
+  "bcrypt": "^5.1.1"
+},
   "devDependencies": {
     "nodemon": "^3.0.1"
   }
