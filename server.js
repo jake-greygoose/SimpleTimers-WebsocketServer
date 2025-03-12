@@ -7,6 +7,40 @@ const fs = require('fs');
 const bcrypt = require('bcrypt');
 
 
+/**
+ * Generate a short, readable invite code
+ * @param {number} [length=6] - Length of the invite code
+ * @returns {string} Generated invite code
+ */
+function generateInviteCode(length = 6) {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // easy-to-read characters
+  let code = '';
+  for (let i = 0; i < length; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+/**
+ * Generate a unique invite code for a room
+ * @returns {Promise<string>} Unique invite code
+ */
+async function generateUniqueInviteCode() {
+  while (true) {
+    const code = generateInviteCode();
+    try {
+      const existingRoom = await getOne('SELECT * FROM rooms WHERE invite_token = ?', [code]);
+      if (!existingRoom) {
+        return code;
+      }
+      // If code exists, loop will generate a new one
+    } catch (error) {
+      console.error('Error checking invite code uniqueness:', error);
+      throw error;
+    }
+  }
+}
+
 // Create a simple HTTP server
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -37,6 +71,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
 });
 
 // Initialize the database schema
+
 function initializeDatabase() {
   db.serialize(() => {
     // Enable WAL Mode
@@ -76,17 +111,27 @@ function initializeDatabase() {
 
     // Create a default public room if none exists
     const now = Math.floor(Date.now() / 1000);
-    db.run(`INSERT OR IGNORE INTO rooms (id, name, created_at, is_public)
-      VALUES ('default', 'Public Room', ?, 1)`, 
-      [now], 
-      function(err) {
-        if (err) {
-          console.error('Error creating default room:', err);
-        } else if (this.changes > 0) {
-          console.log('Default room created');
-        }
+    
+    // Modify to use the new invite code generation
+    (async () => {
+      try {
+        const defaultInviteToken = await generateUniqueInviteCode();
+        
+        db.run(`INSERT OR IGNORE INTO rooms (id, name, created_at, is_public, invite_token)
+          VALUES ('default', 'Public Room', ?, 1, ?)`, 
+          [now, defaultInviteToken], 
+          function(err) {
+            if (err) {
+              console.error('Error creating default room:', err);
+            } else if (this.changes > 0) {
+              console.log('Default room created');
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error generating invite token for default room:', error);
       }
-    );
+    })();
   });
 }
 
@@ -383,7 +428,7 @@ async function handleJoinRoom(message, ws, clientInfo, now) {
 
 async function handleCreateRoom(message, ws, clientInfo, now) {
   const roomId = crypto.randomUUID();
-  const inviteToken = crypto.randomUUID();
+  const inviteToken = await generateUniqueInviteCode();
   const roomName = message.name || 'New Room';
   const isPublic = message.isPublic !== false;
   let hashedPassword = null;
@@ -421,7 +466,7 @@ async function handleCreateRoom(message, ws, clientInfo, now) {
     }));
   }
 }
-  
+
 async function handleLeaveRoom(ws, clientInfo, now) {
   if (!clientInfo.roomId) return;
   
