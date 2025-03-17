@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timer App Client (Debug)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        .debug-panel {
+            background-color: #ffe6e6;
+            border: 1px solid #ffcccc;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        #status-display {
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            line-height: 1.5;
+        }
+        button {
+            background-color: #0d6efd;
+            color: white;
+            border: none;
+            cursor: pointer;
+            padding: 10px;
+            font-weight: 500;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #0b5ed7;
+        }
+        .log-container {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        #rooms-display {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Timer App Debug Client</h1>
+    
+    <div class="debug-panel">
+        <h3>Diagnostic Information</h3>
+        <div id="status-display">Initializing diagnostic client...</div>
+    </div>
+    
+    <div>
+        <button id="check-elements">Check DOM Elements</button>
+        <button id="test-connection">Test Connection</button>
+        <button id="get-rooms">Request Rooms</button>
+        <button id="test-create">Test Create Room</button>
+    </div>
+    
+    <h3>Connection Log</h3>
+    <div id="log-container" class="log-container">
+        <div class="log-entry">Waiting for user action...</div>
+    </div>
+    
+    <h3>Rooms Information</h3>
+    <div id="rooms-display">
+        No room data available yet.
+    </div>
+    
+    <script>
+        // DOM Elements
+        const statusDisplay = document.getElementById('status-display');
+        const logContainer = document.getElementById('log-container');
+        const roomsDisplay = document.getElementById('rooms-display');
+        const checkElementsBtn = document.getElementById('check-elements');
+        const testConnectionBtn = document.getElementById('test-connection');
+        const getRoomsBtn = document.getElementById('get-rooms');
+        const testCreateBtn = document.getElementById('test-create');
+        
+        // WebSocket connection
+        let ws = null;
+        
+        // Logging function
+        function log(message, data = null) {
+            const now = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            
+            if (data) {
+                let displayData;
+                try {
+                    displayData = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+                } catch (e) {
+                    displayData = '[Complex object]';
+                }
+                logEntry.textContent = `[${now}] ${message}: ${displayData}`;
+            } else {
+                logEntry.textContent = `[${now}] ${message}`;
+            }
+            
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            console.log(`${message}`, data);
+        }
+        
+        // Update status display
+        function updateStatus(message) {
+            const now = new Date().toLocaleTimeString();
+            statusDisplay.textContent += `\n[${now}] ${message}`;
+            statusDisplay.scrollTop = statusDisplay.scrollHeight;
+        }
+        
+        // Check if all DOM elements are correctly found
+        function checkDOMElements() {
+            updateStatus('Checking DOM Elements...');
+            
+            const elements = [
+                { name: 'statusDisplay', element: statusDisplay },
+                { name: 'logContainer', element: logContainer },
+                { name: 'roomsDisplay', element: roomsDisplay },
+                { name: 'checkElementsBtn', element: checkElementsBtn },
+                { name: 'testConnectionBtn', element: testConnectionBtn },
+                { name: 'getRoomsBtn', element: getRoomsBtn },
+                { name: 'testCreateBtn', element: testCreateBtn }
+            ];
+            
+            let allFound = true;
+            elements.forEach(item => {
+                if (!item.element) {
+                    updateStatus(`ERROR: ${item.name} not found!`);
+                    allFound = false;
+                }
+            });
+            
+            if (allFound) {
+                updateStatus('SUCCESS: All DOM elements found correctly');
+            }
+            
+            return allFound;
+        }
+        
+        // Test WebSocket connection
+        function testConnection() {
+            updateStatus('Testing WebSocket connection...');
+            
+            try {
+                // Close existing connection if any
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+                
+                const serverUrl = 'wss://simple-timers-wss.onrender.com';
+                updateStatus(`Connecting to: ${serverUrl}`);
+                
+                ws = new WebSocket(serverUrl);
+                
+                ws.onopen = () => {
+                    updateStatus('CONNECTION SUCCESS: WebSocket connected!');
+                    log('WebSocket connection established');
+                    getRoomsBtn.disabled = false;
+                    testCreateBtn.disabled = false;
+                };
+                
+                ws.onclose = (event) => {
+                    updateStatus(`WebSocket disconnected (Code: ${event.code}, Reason: ${event.reason || 'No reason provided'})`);
+                    log('WebSocket connection closed', { code: event.code, reason: event.reason });
+                    getRoomsBtn.disabled = true;
+                    testCreateBtn.disabled = true;
+                };
+                
+                ws.onerror = (error) => {
+                    updateStatus(`CONNECTION ERROR: ${error.message || 'Unknown error'}`);
+                    log('WebSocket error', error);
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        log('Received message', message);
+                        updateStatus(`Received message: ${message.type}`);
+                        
+                        if (message.type === 'available_rooms') {
+                            displayRooms(message.rooms);
+                        }
+                    } catch (error) {
+                        log('Error processing message', error);
+                        updateStatus(`Message processing error: ${error.message}`);
+                    }
+                };
+                
+                return true;
+            } catch (error) {
+                updateStatus(`SETUP ERROR: ${error.message}`);
+                log('Connection setup error', error);
+                return false;
+            }
+        }
+        
+        // Request rooms from server
+        function requestRooms() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                updateStatus('ERROR: WebSocket not connected. Cannot request rooms.');
+                return false;
+            }
+            
+            updateStatus('Requesting available rooms...');
+            
+            // WebSocket protocol doesn't have a direct "get rooms" message type
+            // But connecting should automatically return available rooms
+            // We can send a ping to make sure the connection is alive
+            ws.send(JSON.stringify({ type: 'ping' }));
+            log('Sent ping to server (Should trigger room list response)');
+            
+            return true;
+        }
+        
+        // Test creating a room
+        function testCreateRoom() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                updateStatus('ERROR: WebSocket not connected. Cannot create room.');
+                return false;
+            }
+            
+            const roomName = `Test Room ${Math.floor(Math.random() * 10000)}`;
+            updateStatus(`Creating test room: ${roomName}...`);
+            
+            const message = {
+                type: 'create_room',
+                name: roomName,
+                isPublic: true
+            };
+            
+            ws.send(JSON.stringify(message));
+            log('Sent create room request', message);
+            
+            return true;
+        }
+        
+        // Display rooms in the UI
+        function displayRooms(rooms) {
+            roomsDisplay.innerHTML = '';
+            
+            if (!rooms || rooms.length === 0) {
+                roomsDisplay.textContent = 'No rooms available.';
+                return;
+            }
+            
+            const roomList = document.createElement('ul');
+            
+            rooms.forEach(room => {
+                const roomItem = document.createElement('li');
+                roomItem.innerHTML = `
+                    <strong>${room.name || 'Unnamed Room'}</strong>
+                    <div>ID: ${room.id}</div>
+                    <div>Public: ${room.is_public === 1 ? 'Yes' : 'No'}</div>
+                    <div>Clients: ${room.client_count || 0}</div>
+                `;
+                roomList.appendChild(roomItem);
+            });
+            
+            roomsDisplay.appendChild(roomList);
+            log('Updated rooms display with', rooms.length, 'rooms');
+        }
+        
+        // Add event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            updateStatus('Page loaded. DOM content ready.');
+            
+            // Check if elements are found
+            if (checkDOMElements()) {
+                updateStatus('Ready for testing. Click "Test Connection" to begin.');
+            }
+            
+            // Initially disable buttons that require connection
+            getRoomsBtn.disabled = true;
+            testCreateBtn.disabled = true;
+        });
+        
+        // Button event listeners
+        checkElementsBtn.addEventListener('click', checkDOMElements);
+        testConnectionBtn.addEventListener('click', testConnection);
+        getRoomsBtn.addEventListener('click', requestRooms);
+        testCreateBtn.addEventListener('click', testCreateRoom);
+    </script>
+</body>
+</html>
