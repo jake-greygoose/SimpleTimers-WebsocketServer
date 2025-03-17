@@ -333,7 +333,15 @@
             logEntry.className = 'log-entry';
             
             if (data) {
-                logEntry.textContent = `[${now}] ${message}: ${JSON.stringify(data, null, 2)}`;
+                let displayData = data;
+                if (typeof data === 'object') {
+                    try {
+                        displayData = JSON.stringify(data, null, 2);
+                    } catch (e) {
+                        displayData = String(data);
+                    }
+                }
+                logEntry.textContent = `[${now}] ${message}: ${displayData}`;
             } else {
                 logEntry.textContent = `[${now}] ${message}`;
             }
