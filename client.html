@@ -194,7 +194,7 @@
     <div class="form-group">
         <label for="server-url">WebSocket Server URL</label>
         <div style="display: flex; gap: 10px;">
-            <input type="text" id="server-url" value="ws://localhost:8080" placeholder="ws://localhost:8080">
+            <input type="text" id="server-url" placeholder="ws://localhost:8080">
             <button id="connect-btn" style="width: auto;">Connect</button>
             <button id="disconnect-btn" style="width: auto;" disabled>Disconnect</button>
         </div>
@@ -312,7 +312,7 @@
         
         const roomList = document.getElementById('room-list');
         const currentRoomName = document.getElementById('current-room-name');
-        const currentRoomId = document.getElementById('current-room-id');
+        const currentRoomIdElement = document.getElementById('current-room-id');
         const currentRoomToken = document.getElementById('current-room-token');
         const roomDetails = document.getElementById('room-details');
         
@@ -556,7 +556,7 @@
         function updateUIForRoomJoined(room) {
             currentRoomId = room.id;
             currentRoomName.textContent = room.name;
-            currentRoomId.textContent = room.id;
+            currentRoomIdElement.textContent = room.id;
             currentRoomToken.textContent = room.invite_token || 'None';
             roomDetails.style.display = 'block';
             
@@ -640,7 +640,9 @@
                 
                 ws.onerror = (error) => {
                     updateConnectionStatus('Error');
-                    logMessage('WebSocket error', error);
+                    console.error('WebSocket connection error:', error);
+                    logMessage('WebSocket error', 'Connection failed. Check console for details.');
+                    alert('Failed to connect to the WebSocket server. Please check if the server is running and accessible.');
                 };
                 
                 ws.onmessage = (event) => {
@@ -747,7 +749,7 @@
                     } else {
                         clearInterval(pingInterval);
                     }
-                }, a20000);
+                }, 20000);
                 
             } catch (error) {
                 updateConnectionStatus('Error');
@@ -931,8 +933,14 @@
             logMessage('Stopping timer', message);
         });
         
-        // Fix typo in ping interval
-        const a20000 = 20000;
+        // Initialize the WebSocket URL
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set the WebSocket URL to your Render.com instance
+            serverUrlInput.value = 'wss://simple-timers-wss.onrender.com';
+            
+            // Add a console message to help with debugging
+            console.log('Client initialized. Ready to connect to: ' + serverUrlInput.value);
+        });
     </script>
 </body>
 </html>
