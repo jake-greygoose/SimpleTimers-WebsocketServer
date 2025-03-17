@@ -728,6 +728,16 @@
                             case 'client_left':
                                 logMessage('Client left', message.clientId);
                                 break;
+                            case 'pong':
+                                logMessage('Received pong from server');
+                                // Respond with a ping after a short delay (to avoid ping-pong flood)
+                                setTimeout(() => {
+                                    if (ws && ws.readyState === WebSocket.OPEN) {
+                                        ws.send(JSON.stringify({ type: 'ping' }));
+                                        logMessage('Sent ping response');
+                                    }
+                                }, 5000); // 5-second delay before responding with a ping
+                                break;
                                 
                             case 'error':
                                 logMessage('Error from server', message);
