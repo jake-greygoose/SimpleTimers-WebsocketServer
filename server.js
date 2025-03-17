@@ -1,860 +1,1015 @@
-const http = require('http');
-const WebSocket = require('ws');
-const sqlite3 = require('sqlite3').verbose();
-const crypto = require('crypto');
-const url = require('url');
-const path = require('path');
-const fs = require('fs');
-const bcrypt = require('bcrypt');
-
-
-/**
- * Generate a short, readable invite code
- * @param {number} [length=6] - Length of the invite code
- * @returns {string} Generated invite code
- */
-function generateInviteCode(length = 6) {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // easy-to-read characters
-  let code = '';
-  for (let i = 0; i < length; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
-
-/**
- * Generate a unique invite code for a room
- * @returns {Promise<string>} Unique invite code
- */
-async function generateUniqueInviteCode() {
-  while (true) {
-    const code = generateInviteCode();
-    try {
-      const existingRoom = await getOne('SELECT * FROM rooms WHERE invite_token = ?', [code]);
-      if (!existingRoom) {
-        return code;
-      }
-      // If code exists, loop will generate a new one
-    } catch (error) {
-      console.error('Error checking invite code uniqueness:', error);
-      throw error;
-    }
-  }
-}
-
-
-// Create a simple HTTP server with improved routing
-  const server = http.createServer((req, res) => {
-  const parsedUrl = url.parse(req.url, true);
-  const pathname = parsedUrl.pathname;
-  
-  // Route for the client page
-  if (pathname === '/client') {
-    const clientPath = path.join(__dirname, 'client.html');
-    
-    // Read the client HTML file and serve it
-    fs.readFile(clientPath, (err, content) => {
-      if (err) {
-        // If the file doesn't exist, create a simple error response
-        if (err.code === 'ENOENT') {
-          res.writeHead(404, { 'Content-Type': 'text/html' });
-          res.end('<h1>Error 404: Client file not found</h1><p>Please make sure client.html exists in the application directory.</p>');
-        } else {
-          // Server error
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end('Internal Server Error: ' + err.message);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timer App Client</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
         }
-      } else {
-        // Successfully read the file, serve it
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(content);
-      }
-    });
-  } else {
-    // Default response for the root and other routes
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Timer WebSocket server is running');
-  }
-});
-
-// Get port from environment variable (required for Render.com)
-const PORT = process.env.PORT || 8080;
-
-// Ensure tmp directory exists for Render.com
-const dbDir = '/data';
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-
-// Configure database path that works on Render.com
-const dbPath = path.join(dbDir, 'timer_app.db');
-console.log(`Using persistent database at: ${dbPath}`);
-
-// Initialize SQLite database
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Database opening error:', err);
-  } else {
-    console.log('Connected to SQLite database');
-    initializeDatabase();
-  }
-});
-
-// Initialize the database schema
-
-function initializeDatabase() {
-  db.serialize(() => {
-    // Enable WAL Mode
-    db.exec("PRAGMA journal_mode = WAL;");
-
-    // Create rooms table
-    db.run(`CREATE TABLE IF NOT EXISTS rooms (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      password_hash TEXT,
-      is_public INTEGER DEFAULT 1,
-      invite_token TEXT UNIQUE
-    )`);
-
-    // Create timers table
-    db.run(`CREATE TABLE IF NOT EXISTS timers (
-      id TEXT PRIMARY KEY,
-      room_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      duration INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      started_at INTEGER DEFAULT NULL,
-      paused_at INTEGER DEFAULT NULL,
-      completed_at INTEGER DEFAULT NULL,
-      status TEXT NOT NULL,
-      FOREIGN KEY (room_id) REFERENCES rooms(id)
-    )`);
-
-    // Create clients table
-    db.run(`CREATE TABLE IF NOT EXISTS clients (
-      id TEXT PRIMARY KEY,
-      room_id TEXT,
-      last_seen INTEGER NOT NULL,
-      FOREIGN KEY (room_id) REFERENCES rooms(id)
-    )`);
-
-    // Create a default public room if none exists
-    const now = Math.floor(Date.now() / 1000);
+        h1, h2, h3 {
+            color: #333;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .left-panel, .right-panel {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .room-list, .timer-list {
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .room-item, .timer-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .room-item:hover, .timer-item:hover {
+            background-color: #e9e9e9;
+        }
+        .room-item.selected, .timer-item.selected {
+            background-color: #d1e7dd;
+            border-left: 4px solid #198754;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        input, button, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #0d6efd;
+            color: white;
+            border: none;
+            cursor: pointer;
+            padding: 10px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0b5ed7;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .timer-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .timer-controls button {
+            flex: 1;
+        }
+        .start-btn {
+            background-color: #198754;
+        }
+        .start-btn:hover {
+            background-color: #157347;
+        }
+        .pause-btn {
+            background-color: #fd7e14;
+        }
+        .pause-btn:hover {
+            background-color: #e56e06;
+        }
+        .stop-btn {
+            background-color: #dc3545;
+        }
+        .stop-btn:hover {
+            background-color: #bb2d3b;
+        }
+        #connection-status {
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            text-align: center;
+        }
+        .connected {
+            background-color: #d1e7dd;
+            color: #0f5132;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #842029;
+        }
+        .connecting {
+            background-color: #fff3cd;
+            color: #664d03;
+        }
+        .log-container {
+            margin-top: 20px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .room-details {
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        .timer-progress {
+            height: 20px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            overflow: hidden;
+        }
+        .timer-progress-bar {
+            height: 100%;
+            background-color: #0d6efd;
+            transition: width 1s linear;
+        }
+        .timer-details {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-left: 5px;
+        }
+        .badge-success {
+            background-color: #d1e7dd;
+            color: #0f5132;
+        }
+        .badge-warning {
+            background-color: #fff3cd;
+            color: #664d03;
+        }
+        .badge-danger {
+            background-color: #f8d7da;
+            color: #842029;
+        }
+        .badge-info {
+            background-color: #cff4fc;
+            color: #055160;
+        }
+    </style>
+</head>
+<body>
+    <h1>Timer App Test Client</h1>
     
-    // Modify to use the new invite code generation
-    (async () => {
-      try {
-        const defaultInviteToken = await generateUniqueInviteCode();
+    <div id="connection-status" class="disconnected">Disconnected</div>
+    
+    <div class="form-group">
+        <label for="server-url">WebSocket Server URL</label>
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="server-url" value="wss://simple-timers-wss.onrender.com" placeholder="ws://localhost:8080">
+            <button id="connect-btn" style="width: auto;">Connect</button>
+            <button id="disconnect-btn" style="width: auto;" disabled>Disconnect</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="left-panel">
+            <h2>Rooms</h2>
+            
+            <div id="create-room-form">
+                <h3>Create Room</h3>
+                <div class="form-group">
+                    <label for="room-name">Room Name</label>
+                    <input type="text" id="room-name" placeholder="My Room">
+                </div>
+                <div class="form-group">
+                    <label for="room-password">Password (optional)</label>
+                    <input type="password" id="room-password" placeholder="Leave empty for no password">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="room-public" checked>
+                        Public Room
+                    </label>
+                </div>
+                <button id="create-room-btn" disabled>Create Room</button>
+            </div>
+            
+            <div id="join-room-form" style="margin-top: 20px;">
+                <h3>Join Room</h3>
+                <div class="form-group">
+                    <label for="join-room-password">Password (if required)</label>
+                    <input type="password" id="join-room-password" placeholder="Enter room password">
+                </div>
+                <div class="form-group">
+                    <label for="join-invite-token">Invite Token (if available)</label>
+                    <input type="text" id="join-invite-token" placeholder="Enter invite token">
+                </div>
+                <button id="join-room-btn" disabled>Join Selected Room</button>
+                <button id="leave-room-btn" disabled>Leave Current Room</button>
+            </div>
+            
+            <h3>Available Rooms</h3>
+            <div id="room-list" class="room-list">
+                <div class="room-item">Loading rooms...</div>
+            </div>
+        </div>
         
-        db.run(`INSERT OR IGNORE INTO rooms (id, name, created_at, is_public, invite_token)
-          VALUES ('default', 'Public Room', ?, 1, ?)`, 
-          [now, defaultInviteToken], 
-          function(err) {
-            if (err) {
-              console.error('Error creating default room:', err);
-            } else if (this.changes > 0) {
-              console.log('Default room created');
+        <div class="right-panel">
+            <div id="current-room-info">
+                <h2>Current Room: <span id="current-room-name">None</span></h2>
+                <div id="room-details" class="room-details" style="display: none;">
+                    <div><strong>Room ID:</strong> <span id="current-room-id"></span></div>
+                    <div><strong>Invite Token:</strong> <span id="current-room-token"></span></div>
+                </div>
+            </div>
+            
+            <div id="create-timer-form">
+                <h3>Create Timer</h3>
+                <div class="form-group">
+                    <label for="timer-name">Timer Name</label>
+                    <input type="text" id="timer-name" placeholder="My Timer">
+                </div>
+                <div class="form-group">
+                    <label for="timer-duration">Duration (seconds)</label>
+                    <input type="number" id="timer-duration" value="60" min="1">
+                </div>
+                <button id="create-timer-btn" disabled>Create Timer</button>
+            </div>
+            
+            <h3>Active Timers</h3>
+            <div id="timer-list" class="timer-list">
+                <div class="timer-item">Join a room to see timers</div>
+            </div>
+            
+            <div id="timer-controls" class="timer-controls" style="display: none;">
+                <button id="start-timer-btn" class="start-btn" disabled>Start</button>
+                <button id="pause-timer-btn" class="pause-btn" disabled>Pause</button>
+                <button id="stop-timer-btn" class="stop-btn" disabled>Stop</button>
+            </div>
+        </div>
+    </div>
+    
+    <h3>Connection Log</h3>
+    <div id="log-container" class="log-container">
+        <div class="log-entry">Waiting for connection...</div>
+    </div>
+    
+    <script>
+        // Verify DOM loaded completely before accessing elements
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM fully loaded - starting application');
+            initializeApp();
+        });
+
+        function initializeApp() {
+            // Global variables
+            let ws = null;
+            let selectedRoomId = null;
+            let currentRoomId = null;
+            let selectedTimerId = null;
+            let availableRooms = [];
+            let roomTimers = [];
+            let timerIntervals = {};
+            
+            // Verify DOM elements exist
+            const connectBtn = document.getElementById('connect-btn');
+            const disconnectBtn = document.getElementById('disconnect-btn');
+            const serverUrlInput = document.getElementById('server-url');
+            const connectionStatus = document.getElementById('connection-status');
+            const logContainer = document.getElementById('log-container');
+            
+            const roomNameInput = document.getElementById('room-name');
+            const roomPasswordInput = document.getElementById('room-password');
+            const roomPublicCheckbox = document.getElementById('room-public');
+            const createRoomBtn = document.getElementById('create-room-btn');
+            
+            const joinRoomPasswordInput = document.getElementById('join-room-password');
+            const joinInviteTokenInput = document.getElementById('join-invite-token');
+            const joinRoomBtn = document.getElementById('join-room-btn');
+            const leaveRoomBtn = document.getElementById('leave-room-btn');
+            
+            const roomList = document.getElementById('room-list');
+            const currentRoomName = document.getElementById('current-room-name');
+            const currentRoomIdElement = document.getElementById('current-room-id');
+            const currentRoomToken = document.getElementById('current-room-token');
+            const roomDetails = document.getElementById('room-details');
+            
+            const timerNameInput = document.getElementById('timer-name');
+            const timerDurationInput = document.getElementById('timer-duration');
+            const createTimerBtn = document.getElementById('create-timer-btn');
+            
+            const timerList = document.getElementById('timer-list');
+            const timerControls = document.getElementById('timer-controls');
+            const startTimerBtn = document.getElementById('start-timer-btn');
+            const pauseTimerBtn = document.getElementById('pause-timer-btn');
+            const stopTimerBtn = document.getElementById('stop-timer-btn');
+            
+            // Check if all elements were found
+            const requiredElements = {
+                connectBtn, disconnectBtn, serverUrlInput, connectionStatus, logContainer,
+                roomNameInput, roomPasswordInput, roomPublicCheckbox, createRoomBtn,
+                joinRoomPasswordInput, joinInviteTokenInput, joinRoomBtn, leaveRoomBtn,
+                roomList, currentRoomName, currentRoomIdElement, currentRoomToken, roomDetails,
+                timerNameInput, timerDurationInput, createTimerBtn,
+                timerList, timerControls, startTimerBtn, pauseTimerBtn, stopTimerBtn
+            };
+            
+            let missingElements = [];
+            for (const [name, element] of Object.entries(requiredElements)) {
+                if (!element) {
+                    missingElements.push(name);
+                    console.error(`Missing DOM element: ${name}`);
+                }
             }
-          }
-        );
-      } catch (error) {
-        console.error('Error generating invite token for default room:', error);
-      }
-    })();
-  });
-}
-
-// Create a promise-based wrapper for database operations
-function runQuery(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) {
-      if (err) reject(err);
-      else resolve({ lastID: this.lastID, changes: this.changes });
-    });
-  });
-}
-
-function getOne(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
-}
-
-function getAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows || []);
-    });
-  });
-}
-
-/**
- * Helper function to calculate the current state of a timer.
- * Computes the remaining time based on the timer's status and timestamps.
- */
-function calculateCurrentTimerState(timer) {
-  const now = Math.floor(Date.now() / 1000);
-  let remaining = timer.duration;
-
-  switch (timer.status) {
-    case 'running':
-      remaining = Math.max(0, timer.duration - (now - timer.started_at));
-      if (remaining === 0) {
-        timer.status = 'completed';
-        timer.completed_at = timer.started_at + timer.duration;
-      }
-      break;
-    case 'paused':
-      remaining = Math.max(0, timer.duration - (timer.paused_at - timer.started_at));
-      break;
-    case 'completed':
-      remaining = 0;
-      break;
-    default:
-      remaining = timer.duration;
-  }
-
-  return {
-    ...timer,
-    remaining,
-    current_server_time: now
-  };
-}
-
-// Create WebSocket server using the HTTP server (required for WSS on Render.com)
-const wss = new WebSocket.Server({ server });
-
-// Clients collection
-const clients = new Map();
-
-// Global keep-alive ping interval
-const interval = setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) {
-      console.log('Terminating dead client');
-      return ws.terminate();
-    }
-    ws.isAlive = false;
-    ws.ping();
-  });
-}, 30000);
-
-wss.on('close', () => {
-  clearInterval(interval);
-});
-
-// Broadcast to all clients in a specific room
-function broadcastToRoom(roomId, message, excludeClient = null) {
-  const messageStr = JSON.stringify(message);
-  
-  wss.clients.forEach(client => {
-    const clientInfo = clients.get(client);
-    if (client !== excludeClient && 
-        client.readyState === WebSocket.OPEN && 
-        clientInfo && 
-        clientInfo.roomId === roomId) {
-      client.send(messageStr);
-    }
-  });
-}
-
-// Specialized broadcast function for timer updates
-function broadcastTimerUpdate(roomId, message, excludeClient = null) {
-  const messageStr = JSON.stringify(message);
-  const timerId = message.timer ? message.timer.id : null;
-  
-  wss.clients.forEach(client => {
-    const clientInfo = clients.get(client);
-    
-    if (client === excludeClient || 
-        !clientInfo || 
-        clientInfo.roomId !== roomId || 
-        client.readyState !== WebSocket.OPEN) {
-      return;
-    }
-    
-    if (timerId && 
-        message.type.startsWith('timer_') && 
-        clientInfo.subscribedTimers.size > 0 && 
-        !clientInfo.subscribedTimers.has(timerId)) {
-      return;
-    }
-    
-    client.send(messageStr);
-  });
-}
-
-// Handle WebSocket connections
-wss.on('connection', async (ws, req) => {
-  // Set up heartbeat mechanism
-  ws.isAlive = true;
-  ws.on('pong', () => {
-    ws.isAlive = true;
-  });
-
-  // Generate client ID for new connection
-  const clientId = crypto.randomUUID();
-  clients.set(ws, { id: clientId, roomId: null, subscribedTimers: new Set() });
-  
-  console.log(`Client connected: ${clientId}`);
-  
-  try {
-    // Send available rooms to the newly connected client
-    const publicRooms = await getAll(`
-      SELECT r.id, r.name, r.created_at, r.is_public,
-        (SELECT COUNT(*) FROM clients WHERE clients.room_id = r.id) AS client_count
-      FROM rooms r
-      WHERE r.is_public = 1 OR r.id = ?
-      ORDER BY r.name
-    `, ['default']);
-    
-    ws.send(JSON.stringify({
-      type: 'available_rooms',
-      rooms: publicRooms
-    }));
-  } catch (error) {
-    console.error('Error getting rooms:', error);
-  }
-  
-  // Handle incoming messages
-  ws.on('message', async (data) => {
-    try {
-      const message = JSON.parse(data.toString());
-      const clientInfo = clients.get(ws);
-      
-      console.log(`Received from ${clientInfo.id}:`, message);
-      
-      // Update client's last seen time
-      const now = Math.floor(Date.now() / 1000);
-      
-      switch(message.type) {
-        case 'join_room':
-          await handleJoinRoom(message, ws, clientInfo, now);
-          break;
-        case 'create_room':
-          await handleCreateRoom(message, ws, clientInfo, now);
-          break;
-        case 'leave_room':
-          await handleLeaveRoom(ws, clientInfo, now);
-          break;
-        case 'create_timer':
-          await handleCreateTimer(message, ws, clientInfo, now);
-          break;
-        case 'start_timer':
-          await handleStartTimer(message, ws, clientInfo);
-          break;
-        case 'pause_timer':
-          await handlePauseTimer(message, ws, clientInfo);
-          break;
-        case 'stop_timer':
-          await handleStopTimer(message, ws, clientInfo);
-          break;
-        case 'get_timers':
-          await handleGetTimers(message, ws, clientInfo);
-          break;
-        case 'subscribe_to_timer':
-          await handleSubscribeToTimer(message, ws, clientInfo);
-          break;
-        case 'unsubscribe_from_timer':
-          await handleUnsubscribeFromTimer(message, ws, clientInfo);
-          break;
-        case 'ping':
-          ws.send(JSON.stringify({ type: 'pong' }));
-          break;
-        default:
-          console.warn(`Unknown message type: ${message.type}`);
-      }
-    } catch (error) {
-      console.error('Error processing message:', error);
-    }
-  });
-  
-  // Handle disconnection with cleanup
-  ws.on('close', async () => {
-    const clientInfo = clients.get(ws);
-    if (clientInfo) {
-      console.log(`Client disconnected: ${clientInfo.id}`);
-      
-      if (clientInfo.roomId) {
-        broadcastToRoom(clientInfo.roomId, {
-          type: 'client_left',
-          clientId: clientInfo.id
-        }, ws);
-      }
-      
-      clients.delete(ws);
-      
-      // Immediately remove client entry from database upon disconnect
-      try {
-        await runQuery(`DELETE FROM clients WHERE id = ?`, [clientInfo.id]);
-      } catch (err) {
-        console.error(`Error deleting client ${clientInfo.id} from database:`, err);
-      }
-    }
-  });
-});
-
-// Room handlers
-
-async function handleJoinRoom(message, ws, clientInfo, now) {
-  const roomId = message.roomId;
-  const providedPassword = message.password || null;
-  const providedInviteToken = message.inviteToken || null;
-
-  try {
-    const room = await getOne(`SELECT * FROM rooms WHERE id = ?`, [roomId]);
-
-    if (!room) {
-      return ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
-    }
-
-    let accessGranted = room.is_public;
-
-    if (!accessGranted && room.password_hash && providedPassword) {
-      accessGranted = await bcrypt.compare(providedPassword, room.password_hash);
-    }
-
-    if (!accessGranted && providedInviteToken && providedInviteToken === room.invite_token) {
-      accessGranted = true;
-    }
-
-    if (!accessGranted) {
-      return ws.send(JSON.stringify({ type: 'error', message: 'Invalid credentials or invite token' }));
-    }
-
-    clientInfo.roomId = roomId;
-    clients.set(ws, clientInfo);
-
-    await runQuery(`
-      INSERT INTO clients (id, room_id, last_seen)
-      VALUES (?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET room_id = excluded.room_id, last_seen = excluded.last_seen
-    `, [clientInfo.id, roomId, now]);
-
-    const activeTimers = await getAll(`SELECT * FROM timers WHERE room_id = ?`, [roomId]);
-    const timersWithStates = activeTimers.map(calculateCurrentTimerState);
-
-    ws.send(JSON.stringify({
-      type: 'room_joined',
-      roomId: roomId,
-      room: room,
-      timers: timersWithStates
-    }));
-
-  } catch (error) {
-    console.error('Error joining room:', error);
-    ws.send(JSON.stringify({
-      type: 'error', 
-      message: 'Failed to join room',
-      details: error.message
-    }));
-  }
-}
-
-async function handleCreateRoom(message, ws, clientInfo, now) {
-  const roomId = crypto.randomUUID();
-  const inviteToken = await generateUniqueInviteCode();
-  const roomName = message.name || 'New Room';
-  const isPublic = message.isPublic !== false;
-  let hashedPassword = null;
-
-  try {
-    if (message.password) {
-      hashedPassword = await bcrypt.hash(message.password, 10);
-    }
-
-    await runQuery(`
-      INSERT INTO rooms (id, name, created_at, password_hash, is_public, invite_token)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [roomId, roomName, now, hashedPassword, isPublic ? 1 : 0, inviteToken]);
-
-    clientInfo.roomId = roomId;
-    clients.set(ws, clientInfo);
-
-    ws.send(JSON.stringify({
-      type: 'room_created',
-      room: {
-        id: roomId,
-        name: roomName,
-        created_at: now,
-        is_public: isPublic ? 1 : 0,
-        invite_token: inviteToken
-      }
-    }));
-
-  } catch (error) {
-    console.error('Error creating room:', error);
-    ws.send(JSON.stringify({
-      type: 'error', 
-      message: 'Failed to create room',
-      details: error.message
-    }));
-  }
-}
-
-async function handleLeaveRoom(ws, clientInfo, now) {
-  if (!clientInfo.roomId) return;
-  
-  const roomId = clientInfo.roomId;
-  
-  try {
-    broadcastToRoom(roomId, {
-      type: 'client_left',
-      clientId: clientInfo.id
-    }, ws);
-    
-    clientInfo.roomId = null;
-    clients.set(ws, clientInfo);
-    
-    await runQuery(`
-      INSERT INTO clients (id, room_id, last_seen)
-      VALUES (?, NULL, ?)
-      ON CONFLICT(id) DO UPDATE SET room_id = NULL, last_seen = excluded.last_seen
-    `, [clientInfo.id, now]);
-    
-    ws.send(JSON.stringify({ type: 'room_left' }));
-    
-    const publicRooms = await getAll(`
-      SELECT r.id, r.name, r.created_at, r.is_public,
-        (SELECT COUNT(*) FROM clients WHERE clients.room_id = r.id) AS client_count
-      FROM rooms r
-      WHERE r.is_public = 1 OR r.id = ?
-      ORDER BY r.name
-    `, ['default']);
-    
-    ws.send(JSON.stringify({
-      type: 'available_rooms',
-      rooms: publicRooms
-    }));
-    
-    console.log(`Client ${clientInfo.id} left room ${roomId}`);
-    
-  } catch (error) {
-    console.error('Error leaving room:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to leave room',
-      error: error.message
-    }));
-  }
-}
-
-async function handleCreateTimer(message, ws, clientInfo, now) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room before creating a timer'
-    }));
-    return;
-  }
-  
-  const timerId = crypto.randomUUID();
-  
-  try {
-    await runQuery(`
-      INSERT INTO timers (id, room_id, name, duration, created_at, status)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [
-      timerId,
-      clientInfo.roomId,
-      message.name || 'Timer',
-      message.duration,
-      now,
-      'created'
-    ]);
-    
-    const timerData = await getOne(`SELECT * FROM timers WHERE id = ?`, [timerId]);
-    
-    // Include exact timer state when broadcasting timer creation
-    broadcastTimerUpdate(clientInfo.roomId, {
-      type: 'timer_created',
-      timer: calculateCurrentTimerState(timerData)
-    });
-    
-    console.log(`Timer ${timerId} created in room ${clientInfo.roomId}`);
-    
-  } catch (error) {
-    console.error('Error creating timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to create timer',
-      error: error.message
-    }));
-  }
-}
-
-async function handleStartTimer(message, ws, clientInfo) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room before controlling a timer'
-    }));
-    return;
-  }
-  
-  const now = Math.floor(Date.now() / 1000);
-  
-  try {
-    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    if (!timer || timer.room_id !== clientInfo.roomId) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Timer not found in your current room'
-      }));
-      return;
-    }
-    
-    await runQuery(`
-      UPDATE timers
-      SET status = ?, started_at = ?, paused_at = NULL, completed_at = NULL
-      WHERE id = ?
-    `, ['running', now, message.timerId]);
-    
-    const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    broadcastTimerUpdate(clientInfo.roomId, {
-      type: 'timer_started',
-      timer: calculateCurrentTimerState(updatedTimer)
-    });
-    
-    console.log(`Timer ${message.timerId} started in room ${clientInfo.roomId}`);
-    
-  } catch (error) {
-    console.error('Error starting timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to start timer',
-      error: error.message
-    }));
-  }
-}
-
-async function handlePauseTimer(message, ws, clientInfo) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room before controlling a timer'
-    }));
-    return;
-  }
-  
-  const now = Math.floor(Date.now() / 1000);
-  
-  try {
-    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    if (!timer || timer.room_id !== clientInfo.roomId) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Timer not found in your current room'
-      }));
-      return;
-    }
-    
-    await runQuery(`
-      UPDATE timers
-      SET status = ?, paused_at = ?
-      WHERE id = ?
-    `, ['paused', now, message.timerId]);
-    
-    const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    broadcastTimerUpdate(clientInfo.roomId, {
-      type: 'timer_paused',
-      timer: calculateCurrentTimerState(updatedTimer)
-    });
-    
-    console.log(`Timer ${message.timerId} paused in room ${clientInfo.roomId}`);
-    
-  } catch (error) {
-    console.error('Error pausing timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to pause timer',
-      error: error.message
-    }));
-  }
-}
-
-async function handleStopTimer(message, ws, clientInfo) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room before controlling a timer'
-    }));
-    return;
-  }
-  
-  const now = Math.floor(Date.now() / 1000);
-  
-  try {
-    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    if (!timer || timer.room_id !== clientInfo.roomId) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Timer not found in your current room'
-      }));
-      return;
-    }
-    
-    await runQuery(`
-      UPDATE timers
-      SET status = ?, completed_at = ?
-      WHERE id = ?
-    `, ['completed', now, message.timerId]);
-    
-    const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    broadcastTimerUpdate(clientInfo.roomId, {
-      type: 'timer_completed',
-      timer: calculateCurrentTimerState(updatedTimer)
-    });
-    
-    console.log(`Timer ${message.timerId} stopped in room ${clientInfo.roomId}`);
-    
-  } catch (error) {
-    console.error('Error stopping timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to stop timer',
-      error: error.message
-    }));
-  }
-}
-
-async function handleGetTimers(message, ws, clientInfo) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room to see timers'
-    }));
-    return;
-  }
-  
-  try {
-    const timers = await getAll(`SELECT * FROM timers WHERE room_id = ? ORDER BY created_at DESC`, [clientInfo.roomId]);
-    
-    // Calculate current states for each timer
-    const timersWithExactStates = timers.map(calculateCurrentTimerState);
-    
-    ws.send(JSON.stringify({
-      type: 'timer_list',
-      timers: timersWithExactStates
-    }));
-    
-  } catch (error) {
-    console.error('Error getting timers:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to get timers',
-      error: error.message
-    }));
-  }
-}
-
-async function handleSubscribeToTimer(message, ws, clientInfo) {
-  const timerId = message.timerId;
-  
-  if (!timerId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Missing timer ID'
-    }));
-    return;
-  }
-  
-  try {
-    const timer = await getOne(`SELECT * FROM timers WHERE id = ? AND room_id = ?`, [timerId, clientInfo.roomId]);
-    
-    if (!timer) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Timer not found in your room'
-      }));
-      return;
-    }
-    
-    clientInfo.subscribedTimers.add(timerId);
-    
-    ws.send(JSON.stringify({
-      type: 'timer_subscribed',
-      timerId: timerId
-    }));
-    
-    console.log(`Client ${clientInfo.id} subscribed to timer ${timerId}`);
-    
-  } catch (error) {
-    console.error('Error subscribing to timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to subscribe to timer',
-      error: error.message
-    }));
-  }
-}
-
-async function handleUnsubscribeFromTimer(message, ws, clientInfo) {
-  const timerId = message.timerId;
-  
-  if (!timerId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Missing timer ID'
-    }));
-    return;
-  }
-  
-  try {
-    clientInfo.subscribedTimers.delete(timerId);
-    
-    ws.send(JSON.stringify({
-      type: 'timer_unsubscribed',
-      timerId: timerId
-    }));
-    
-    console.log(`Client ${clientInfo.id} unsubscribed from timer ${timerId}`);
-    
-  } catch (error) {
-    console.error('Error unsubscribing from timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to unsubscribe from timer',
-      error: error.message
-    }));
-  }
-}
-
-// Start the server by listening on the specified port
-server.listen(PORT, () => {
-  console.log(`Room-based Timer WebSocket server running on port ${PORT}`);
-});
-
-// Cleanup old clients periodically (every 5 minutes)
-setInterval(async () => {
-  const cutoff = Math.floor(Date.now() / 1000) - 3600; // 1 hour
-  
-  try {
-    const result = await runQuery('DELETE FROM clients WHERE last_seen < ?', [cutoff]);
-    console.log(`Cleaned up ${result.changes} inactive clients`);
-  } catch (error) {
-    console.error('Error cleaning up clients:', error);
-  }
-}, 5 * 60 * 1000);
-
-// Close database connection when the server is shutting down
-process.on('SIGINT', () => {
-  db.close();
-  process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-  db.close();
-  process.exit(0);
-});
+            
+            if (missingElements.length > 0) {
+                console.error('Application initialization failed. Missing DOM elements:', missingElements);
+                alert(`Application cannot start. Missing elements: ${missingElements.join(', ')}`);
+                return; // Stop initialization if elements are missing
+            }
+            
+            console.log('All DOM elements verified. Continuing initialization...');
+            
+            // Helper functions
+            function logMessage(message, data = null) {
+                const now = new Date().toLocaleTimeString();
+                const logEntry = document.createElement('div');
+                logEntry.className = 'log-entry';
+                
+                if (data) {
+                    let displayData;
+                    try {
+                        displayData = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+                    } catch (e) {
+                        displayData = String(data);
+                    }
+                    logEntry.textContent = `[${now}] ${message}: ${displayData}`;
+                } else {
+                    logEntry.textContent = `[${now}] ${message}`;
+                }
+                
+                logContainer.appendChild(logEntry);
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }
+            
+            function updateConnectionStatus(status) {
+                connectionStatus.textContent = status;
+                connectionStatus.className = status.toLowerCase().replace(' ', '-');
+            }
+            
+            function formatTime(seconds) {
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = seconds % 60;
+                return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+            }
+            
+            function getStatusBadge(status) {
+                switch(status) {
+                    case 'created': return '<span class="badge badge-info">Created</span>';
+                    case 'running': return '<span class="badge badge-success">Running</span>';
+                    case 'paused': return '<span class="badge badge-warning">Paused</span>';
+                    case 'completed': return '<span class="badge badge-danger">Completed</span>';
+                    default: return `<span class="badge">${status}</span>`;
+                }
+            }
+            
+            function displayRooms(rooms) {
+                console.log('Displaying rooms:', rooms);
+                
+                // Clear the room list first
+                roomList.innerHTML = '';
+                
+                if (!rooms || rooms.length === 0) {
+                    const emptyItem = document.createElement('div');
+                    emptyItem.className = 'room-item';
+                    emptyItem.textContent = 'No rooms available';
+                    roomList.appendChild(emptyItem);
+                    return;
+                }
+                
+                // Create room items
+                rooms.forEach(room => {
+                    const roomItem = document.createElement('div');
+                    roomItem.className = 'room-item';
+                    if (selectedRoomId === room.id) {
+                        roomItem.classList.add('selected');
+                    }
+                    roomItem.setAttribute('data-room-id', room.id);
+                    
+                    const roomName = document.createElement('div');
+                    roomName.innerHTML = `<strong>${room.name || 'Unnamed Room'}</strong>`;
+                    
+                    const roomDetails = document.createElement('div');
+                    const isPublic = room.is_public === 1 || room.is_public === true;
+                    const clientCount = room.client_count || 0;
+                    roomDetails.textContent = `Public: ${isPublic ? 'Yes' : 'No'} - Clients: ${clientCount}`;
+                    
+                    roomItem.appendChild(roomName);
+                    roomItem.appendChild(roomDetails);
+                    
+                    roomItem.addEventListener('click', () => {
+                        document.querySelectorAll('.room-item.selected').forEach(el => {
+                            el.classList.remove('selected');
+                        });
+                        roomItem.classList.add('selected');
+                        selectedRoomId = room.id;
+                        joinRoomBtn.disabled = currentRoomId === selectedRoomId;
+                    });
+                    
+                    roomList.appendChild(roomItem);
+                });
+                
+                console.log('Room list updated with', rooms.length, 'rooms');
+            }
+            
+            function updateTimerDisplay(timer) {
+                const timerElement = document.querySelector(`.timer-item[data-timer-id="${timer.id}"]`);
+                if (!timerElement) return;
+                
+                const progressBar = timerElement.querySelector('.timer-progress-bar');
+                const remainingTimeElement = timerElement.querySelector('.timer-remaining');
+                const statusElement = timerElement.querySelector('.timer-status');
+                
+                // Update progress bar
+                const progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
+                progressBar.style.width = `${progressPercent}%`;
+                
+                // Update remaining time
+                remainingTimeElement.textContent = formatTime(timer.remaining);
+                
+                // Update status
+                statusElement.innerHTML = getStatusBadge(timer.status);
+                
+                // Update timer controls based on status
+                updateTimerControls(timer.status);
+            }
+            
+            function renderTimerList() {
+                timerList.innerHTML = '';
+                
+                if (!currentRoomId) {
+                    const emptyItem = document.createElement('div');
+                    emptyItem.className = 'timer-item';
+                    emptyItem.textContent = 'Join a room to see timers';
+                    timerList.appendChild(emptyItem);
+                    return;
+                }
+                
+                if (roomTimers.length === 0) {
+                    const emptyItem = document.createElement('div');
+                    emptyItem.className = 'timer-item';
+                    emptyItem.textContent = 'No timers in this room';
+                    timerList.appendChild(emptyItem);
+                    return;
+                }
+                
+                roomTimers.forEach(timer => {
+                    const timerItem = document.createElement('div');
+                    timerItem.className = 'timer-item';
+                    if (selectedTimerId === timer.id) {
+                        timerItem.classList.add('selected');
+                    }
+                    timerItem.setAttribute('data-timer-id', timer.id);
+                    
+                    timerItem.innerHTML = `
+                        <div><strong>${timer.name}</strong> <span class="timer-status">${getStatusBadge(timer.status)}</span></div>
+                        <div class="timer-progress">
+                            <div class="timer-progress-bar" style="width: ${Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100))}%"></div>
+                        </div>
+                        <div class="timer-details">
+                            <div>Total: ${formatTime(timer.duration)}</div>
+                            <div class="timer-remaining">${formatTime(timer.remaining)}</div>
+                        </div>
+                    `;
+                    
+                    timerItem.addEventListener('click', () => {
+                        document.querySelectorAll('.timer-item.selected').forEach(el => {
+                            el.classList.remove('selected');
+                        });
+                        timerItem.classList.add('selected');
+                        selectedTimerId = timer.id;
+                        updateTimerControls(timer.status);
+                        timerControls.style.display = 'flex';
+                    });
+                    
+                    timerList.appendChild(timerItem);
+                    
+                    // Start interval for updating this timer if it's running
+                    if (timer.status === 'running' && !timerIntervals[timer.id]) {
+                        startTimerInterval(timer);
+                    }
+                });
+            }
+            
+            function startTimerInterval(timer) {
+                // Clear any existing interval for this timer
+                if (timerIntervals[timer.id]) {
+                    clearInterval(timerIntervals[timer.id]);
+                }
+                
+                // Only create interval for running timers
+                if (timer.status !== 'running') return;
+                
+                let remaining = timer.remaining;
+                const duration = timer.duration;
+                const startTime = Date.now();
+                const offset = Math.floor(Date.now() / 1000) - timer.current_server_time;
+                
+                timerIntervals[timer.id] = setInterval(() => {
+                    // Calculate elapsed time since the interval started
+                    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                    
+                    // Calculate new remaining time
+                    remaining = Math.max(0, timer.remaining - elapsed);
+                    
+                    // Update the timer object
+                    const updatedTimer = {...timer, remaining};
+                    
+                    // If timer reaches zero, update status to completed
+                    if (remaining <= 0) {
+                        updatedTimer.status = 'completed';
+                        clearInterval(timerIntervals[timer.id]);
+                        delete timerIntervals[timer.id];
+                    }
+                    
+                    // Update the display
+                    updateTimerDisplay(updatedTimer);
+                }, 1000);
+            }
+            
+            function updateTimerControls(status) {
+                if (!selectedTimerId) {
+                    startTimerBtn.disabled = true;
+                    pauseTimerBtn.disabled = true;
+                    stopTimerBtn.disabled = true;
+                    return;
+                }
+                
+                switch(status) {
+                    case 'created':
+                        startTimerBtn.disabled = false;
+                        pauseTimerBtn.disabled = true;
+                        stopTimerBtn.disabled = false;
+                        break;
+                    case 'running':
+                        startTimerBtn.disabled = true;
+                        pauseTimerBtn.disabled = false;
+                        stopTimerBtn.disabled = false;
+                        break;
+                    case 'paused':
+                        startTimerBtn.disabled = false;
+                        pauseTimerBtn.disabled = true;
+                        stopTimerBtn.disabled = false;
+                        break;
+                    case 'completed':
+                        startTimerBtn.disabled = false;
+                        pauseTimerBtn.disabled = true;
+                        stopTimerBtn.disabled = true;
+                        break;
+                    default:
+                        startTimerBtn.disabled = true;
+                        pauseTimerBtn.disabled = true;
+                        stopTimerBtn.disabled = true;
+                }
+            }
+            
+            function updateUIForRoomJoined(room) {
+                currentRoomId = room.id;
+                currentRoomName.textContent = room.name;
+                currentRoomIdElement.textContent = room.id;
+                currentRoomToken.textContent = room.invite_token || 'None';
+                roomDetails.style.display = 'block';
+                
+                leaveRoomBtn.disabled = false;
+                createTimerBtn.disabled = false;
+                joinRoomBtn.disabled = true;
+                
+                // Highlight the current room in the list
+                document.querySelectorAll('.room-item').forEach(el => {
+                    if (el.getAttribute('data-room-id') === room.id) {
+                        el.classList.add('selected');
+                        selectedRoomId = room.id;
+                    } else {
+                        el.classList.remove('selected');
+                    }
+                });
+            }
+            
+            function updateUIForRoomLeft() {
+                currentRoomId = null;
+                currentRoomName.textContent = 'None';
+                roomDetails.style.display = 'none';
+                
+                leaveRoomBtn.disabled = true;
+                createTimerBtn.disabled = true;
+                joinRoomBtn.disabled = !selectedRoomId;
+                
+                // Clear timers and selection
+                roomTimers = [];
+                selectedTimerId = null;
+                timerControls.style.display = 'none';
+                renderTimerList();
+                
+                // Clear any running intervals
+                Object.keys(timerIntervals).forEach(timerId => {
+                    clearInterval(timerIntervals[timerId]);
+                    delete timerIntervals[timerId];
+                });
+            }
+            
+            // WebSocket connection handling
+            function connectToServer() {
+                const serverUrl = serverUrlInput.value.trim();
+                if (!serverUrl) {
+                    alert('Please enter a valid WebSocket server URL');
+                    return;
+                }
+                
+                try {
+                    updateConnectionStatus('Connecting...');
+                    console.log('Attempting to connect to:', serverUrl);
+                    ws = new WebSocket(serverUrl);
+                    
+                    ws.onopen = () => {
+                        updateConnectionStatus('Connected');
+                        logMessage('Connected to server');
+                        console.log('WebSocket connection established');
+                        
+                        connectBtn.disabled = true;
+                        disconnectBtn.disabled = false;
+                        createRoomBtn.disabled = false;
+                    };
+                    
+                    ws.onclose = () => {
+                        updateConnectionStatus('Disconnected');
+                        logMessage('Disconnected from server');
+                        console.log('WebSocket connection closed');
+                        
+                        connectBtn.disabled = false;
+                        disconnectBtn.disabled = true;
+                        createRoomBtn.disabled = true;
+                        joinRoomBtn.disabled = true;
+                        leaveRoomBtn.disabled = true;
+                        createTimerBtn.disabled = true;
+                        
+                        updateUIForRoomLeft();
+                        
+                        // Clear intervals
+                        Object.keys(timerIntervals).forEach(timerId => {
+                            clearInterval(timerIntervals[timerId]);
+                            delete timerIntervals[timerId];
+                        });
+                    };
+                    
+                    ws.onerror = (error) => {
+                        updateConnectionStatus('Error');
+                        console.error('WebSocket connection error:', error);
+                        logMessage('WebSocket error', 'Connection failed. Check console for details.');
+                        alert('Failed to connect to the WebSocket server. Please check if the server is running and accessible.');
+                    };
+                    
+                    ws.onmessage = (event) => {
+                        try {
+                            const message = JSON.parse(event.data);
+                            console.log('WebSocket message received:', message);
+                            logMessage('Received message', message);
+                            
+                            switch(message.type) {
+                                case 'available_rooms':
+                                    console.log('DEBUG: Available rooms data:', message.rooms);
+                                    // Update rooms and display them
+                                    availableRooms = message.rooms || [];
+                                    displayRooms(availableRooms);
+                                    break;
+                                
+                                case 'room_created':
+                                    logMessage('Room created successfully', message.room);
+                                    updateUIForRoomJoined(message.room);
+                                    break;
+                                    
+                                case 'room_joined':
+                                    logMessage('Joined room', message.room);
+                                    updateUIForRoomJoined(message.room);
+                                    
+                                    // Set timers for this room
+                                    roomTimers = message.timers || [];
+                                    renderTimerList();
+                                    break;
+                                    
+                                case 'room_left':
+                                    logMessage('Left room');
+                                    updateUIForRoomLeft();
+                                    break;
+                                    
+                                case 'timer_list':
+                                    roomTimers = message.timers || [];
+                                    renderTimerList();
+                                    break;
+                                    
+                                case 'timer_created':
+                                    logMessage('Timer created', message.timer);
+                                    roomTimers.push(message.timer);
+                                    renderTimerList();
+                                    break;
+                                    
+                                case 'timer_started':
+                                    logMessage('Timer started', message.timer);
+                                    // Update the timer in our list
+                                    roomTimers = roomTimers.map(t => 
+                                        t.id === message.timer.id ? message.timer : t
+                                    );
+                                    renderTimerList();
+                                    break;
+                                    
+                                case 'timer_paused':
+                                    logMessage('Timer paused', message.timer);
+                                    // Clear the interval
+                                    if (timerIntervals[message.timer.id]) {
+                                        clearInterval(timerIntervals[message.timer.id]);
+                                        delete timerIntervals[message.timer.id];
+                                    }
+                                    
+                                    // Update the timer in our list
+                                    roomTimers = roomTimers.map(t => 
+                                        t.id === message.timer.id ? message.timer : t
+                                    );
+                                    renderTimerList();
+                                    break;
+                                    
+                                case 'timer_completed':
+                                    logMessage('Timer completed', message.timer);
+                                    // Clear the interval
+                                    if (timerIntervals[message.timer.id]) {
+                                        clearInterval(timerIntervals[message.timer.id]);
+                                        delete timerIntervals[message.timer.id];
+                                    }
+                                    
+                                    // Update the timer in our list
+                                    roomTimers = roomTimers.map(t => 
+                                        t.id === message.timer.id ? message.timer : t
+                                    );
+                                    renderTimerList();
+                                    break;
+                                    
+                                case 'client_left':
+                                    logMessage('Client left', message.clientId);
+                                    break;
+                                    
+                                case 'ping':
+                                    logMessage('Received ping from server');
+                                    // Immediately respond with a pong
+                                    if (ws && ws.readyState === WebSocket.OPEN) {
+                                        ws.send(JSON.stringify({ type: 'pong' }));
+                                        logMessage('Sent pong response');
+                                    }
+                                    break;
+                                    
+                                case 'pong':
+                                    logMessage('Received pong from server');
+                                    break;
+                                    
+                                case 'error':
+                                    logMessage('Error from server', message);
+                                    alert(`Server error: ${message.message}`);
+                                    break;
+                                    
+                                default:
+                                    logMessage('Unknown message type', message);
+                            }
+                        } catch (error) {
+                            console.error('Error processing message:', error);
+                            logMessage('Error parsing message', error.message);
+                        }
+                    };
+                    
+                    // Send ping every 20 seconds to keep connection alive
+                    const pingInterval = setInterval(() => {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'ping' }));
+                            logMessage('Sent ping to server');
+                        } else {
+                            clearInterval(pingInterval);
+                        }
+                    }, 20000);
+                    
+                } catch (error) {
+                    updateConnectionStatus('Error');
+                    console.error('Connection error:', error);
+                    logMessage('Connection error', error.message);
+                }
+            }
+            
+            function disconnectFromServer() {
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+            }
+            
+            // Event listeners
+            connectBtn.addEventListener('click', connectToServer);
+            disconnectBtn.addEventListener('click', disconnectFromServer);
+            
+            createRoomBtn.addEventListener('click', () => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert('Not connected to server');
+                    return;
+                }
+                
+                const roomName = roomNameInput.value.trim();
+                if (!roomName) {
+                    alert('Please enter a room name');
+                    return;
+                }
+                
+                const message = {
+                    type: 'create_room',
+                    name: roomName,
+                    isPublic: roomPublicCheckbox.checked
+                };
+                
+                const password = roomPasswordInput.value.trim();
+                if (password) {
+                    message.password = password;
+                }
+                
+                ws.send(JSON.stringify(message));
+                logMessage('Creating room', message);
+            });
+            
+            joinRoomBtn.addEventListener('click', () => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert('Not connected to server');
+                    return;
+                }
+                
+                if (!selectedRoomId) {
+                    alert('Please select a room to join');
+                    return;
+                }
+                
+                const message = {
+                    type: 'join_room',
+                    roomId: selectedRoomId
+                };
+                
+                const password = joinRoomPasswordInput.value.trim();
+                if (password) {
+                    message.password = password;
+                }
+                
+                const inviteToken = joinInviteTokenInput.value.trim();
+                if (inviteToken) {
+                    message.inviteToken = inviteToken;
+                }
+                
+                ws.send(JSON.stringify(message));
+                logMessage('Joining room', message);
+            });
+            
+            leaveRoomBtn.addEventListener('click', () => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert('Not connected to server');
+                    return;
+                }
+                
+                if (!currentRoomId) {
+                    alert('Not in a room');
+                    return;
+                }
+                
+                ws.send(JSON.stringify({ type: 'leave_room' }));
+                logMessage('Leaving room');
+            });
+            
+            createTimerBtn.addEventListener('click', () => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert('Not connected to server');
+                    return;
+                }
+                
+                if (!currentRoomId) {
+                    alert('Not in a room');
+                    return;
+                }
+                
+                const timerName = timerNameInput.value.trim();
+                if (!timerName) {
+                    alert('Please enter a timer name');
+                    return;
+                }
+                
+                const timerDuration = parseInt(timerDurationInput.value);
+                if (isNaN(timerDuration) || timerDuration <= 0) {
+                    alert('Please enter a valid duration');
+                    return;
+                }
+                
+                const message = {
+                    type: 'create_timer',
+                    name: timerName,
+                    duration: timerDuration
+                };
+                
+                ws.send(JSON.stringify(message));
+                logMessage('Creating timer', message);
+            });
+            
+            startTimerBtn.addEventListener('click', () => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert('Not connected to server');
+                    return;
+                }
+                
+                if (!selectedTimerId) {
+                    alert('Please select a timer');
+                    return;
+                }
+                
+                const message = {
+                    type: 'start_timer',
+                    timerId: selectedTimerId
+                };
+                
+                ws.send(JSON.stringify(message));
+                logMessage('Starting timer', message);
+            });
+            
+            pauseTimerBtn.addEventListener('click', () => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert('Not connected to server');
+                    return;
+                }
+                
+                if (!selectedTimerId) {
+                    alert('Please select a timer');
+                    return;
+                }
+                
+                const message = {
+                    type: 'pause_timer',
+                    timerId: selectedTimerId
+                };
+                
+                ws.send(JSON.stringify(message));
+                logMessage('Pausing timer', message);
+            });
+            
+            stopTimerBtn.addEventListener('click', () => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    alert('Not connected to server');
+                    return;
+                }
+                
+                if (!selectedTimerId) {
+                    alert('Please select a timer');
+                    return;
+                }
+                
+                const message = {
+                    type: 'stop_timer',
+                    timerId: selectedTimerId
+                };
+                
+                ws.send(JSON.stringify(message));
+                logMessage('Stopping timer', message);
+            });
+            
+            // Auto-connect if URL is already set
+            if (serverUrlInput.value) {
+                console.log('URL already set, initiating connection...');
+                connectBtn.click();
+            }
+        }
+    </script>
+</body>
+</html>
