@@ -2,6 +2,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const sqlite3 = require('sqlite3').verbose();
 const crypto = require('crypto');
+const url = require('url');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcrypt');
@@ -41,10 +42,39 @@ async function generateUniqueInviteCode() {
   }
 }
 
-// Create a simple HTTP server
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Timer WebSocket server is running');
+
+// Create a simple HTTP server with improved routing
+  const server = http.createServer((req, res) => {
+  const parsedUrl = url.parse(req.url, true);
+  const pathname = parsedUrl.pathname;
+  
+  // Route for the client page
+  if (pathname === '/client') {
+    const clientPath = path.join(__dirname, 'client.html');
+    
+    // Read the client HTML file and serve it
+    fs.readFile(clientPath, (err, content) => {
+      if (err) {
+        // If the file doesn't exist, create a simple error response
+        if (err.code === 'ENOENT') {
+          res.writeHead(404, { 'Content-Type': 'text/html' });
+          res.end('<h1>Error 404: Client file not found</h1><p>Please make sure client.html exists in the application directory.</p>');
+        } else {
+          // Server error
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Internal Server Error: ' + err.message);
+        }
+      } else {
+        // Successfully read the file, serve it
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(content);
+      }
+    });
+  } else {
+    // Default response for the root and other routes
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Timer WebSocket server is running');
+  }
 });
 
 // Get port from environment variable (required for Render.com)
