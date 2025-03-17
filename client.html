@@ -386,42 +386,61 @@
         }
         
         function renderRoomList() {
-            roomList.innerHTML = '';
-            
-            if (availableRooms.length === 0) {
-                const emptyItem = document.createElement('div');
-                emptyItem.className = 'room-item';
-                emptyItem.textContent = 'No rooms available';
-                roomList.appendChild(emptyItem);
-                return;
-            }
-            
-            availableRooms.forEach(room => {
-                const roomItem = document.createElement('div');
-                roomItem.className = 'room-item';
-                if (selectedRoomId === room.id) {
-                    roomItem.classList.add('selected');
+            try {
+                console.log('Rendering room list with', availableRooms.length, 'rooms');
+                roomList.innerHTML = '';
+                
+                if (!availableRooms || availableRooms.length === 0) {
+                    console.log('No rooms to display');
+                    const emptyItem = document.createElement('div');
+                    emptyItem.className = 'room-item';
+                    emptyItem.textContent = 'No rooms available';
+                    roomList.appendChild(emptyItem);
+                    return;
                 }
-                roomItem.setAttribute('data-room-id', room.id);
                 
-                const clientCount = room.client_count || 0;
-                
-                roomItem.innerHTML = `
-                    <div><strong>${room.name}</strong></div>
-                    <div>Public: ${room.is_public ? 'Yes' : 'No'} - Clients: ${clientCount}</div>
-                `;
-                
-                roomItem.addEventListener('click', () => {
-                    document.querySelectorAll('.room-item.selected').forEach(el => {
-                        el.classList.remove('selected');
+                availableRooms.forEach((room, index) => {
+                    console.log(`Processing room ${index}:`, room);
+                    
+                    if (!room || !room.id) {
+                        console.warn('Invalid room data:', room);
+                        return;
+                    }
+                    
+                    const roomItem = document.createElement('div');
+                    roomItem.className = 'room-item';
+                    if (selectedRoomId === room.id) {
+                        roomItem.classList.add('selected');
+                    }
+                    roomItem.setAttribute('data-room-id', room.id);
+                    
+                    // Default values for potentially missing properties
+                    const roomName = room.name || 'Unnamed Room';
+                    const isPublic = room.is_public === 1 || room.is_public === true;
+                    const clientCount = room.client_count || 0;
+                    
+                    roomItem.innerHTML = `
+                        <div><strong>${roomName}</strong></div>
+                        <div>Public: ${isPublic ? 'Yes' : 'No'} - Clients: ${clientCount}</div>
+                    `;
+                    
+                    roomItem.addEventListener('click', () => {
+                        document.querySelectorAll('.room-item.selected').forEach(el => {
+                            el.classList.remove('selected');
+                        });
+                        roomItem.classList.add('selected');
+                        selectedRoomId = room.id;
+                        joinRoomBtn.disabled = currentRoomId === selectedRoomId;
                     });
-                    roomItem.classList.add('selected');
-                    selectedRoomId = room.id;
-                    joinRoomBtn.disabled = currentRoomId === selectedRoomId;
+                    
+                    roomList.appendChild(roomItem);
                 });
                 
-                roomList.appendChild(roomItem);
-            });
+                console.log('Room list rendering complete');
+            } catch (error) {
+                console.error('Error rendering room list:', error);
+                roomList.innerHTML = '<div class="room-item">Error loading rooms. See console for details.</div>';
+            }
         }
         
         function renderTimerList() {
