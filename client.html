@@ -652,7 +652,18 @@
                         
                         switch(message.type) {
                             case 'available_rooms':
-                                availableRooms = message.rooms;
+                            case 'pong':
+                                logMessage('Received pong from server');
+                                break;
+                                
+                            case 'ping':
+                                logMessage('Received ping from server');
+                                // Immediately respond with a pong
+                                if (ws && ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: 'pong' }));
+                                    logMessage('Sent pong response');
+                                }
+                                break;availableRooms = message.rooms;
                                 renderRoomList();
                                 break;
                                 
@@ -727,16 +738,6 @@
                                 
                             case 'client_left':
                                 logMessage('Client left', message.clientId);
-                                break;
-                            case 'pong':
-                                logMessage('Received pong from server');
-                                // Respond with a ping after a short delay (to avoid ping-pong flood)
-                                setTimeout(() => {
-                                    if (ws && ws.readyState === WebSocket.OPEN) {
-                                        ws.send(JSON.stringify({ type: 'ping' }));
-                                        logMessage('Sent ping response');
-                                    }
-                                }, 5000); // 5-second delay before responding with a ping
                                 break;
                                 
                             case 'error':
