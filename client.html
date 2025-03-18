@@ -4,274 +4,105 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Timer App Client</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: #f5f5f5;
-    }
-    h1, h2, h3 {
-      color: #333;
-    }
-    .container {
-      display: flex;
-      gap: 20px;
-    }
-    .left-panel, .right-panel {
-      flex: 1;
-      background: white;
-      border-radius: 8px;
-      padding: 20px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .room-list, .timer-list {
-      margin-top: 20px;
-      max-height: 300px;
-      overflow-y: auto;
-    }
-    .room-item, .timer-item {
-      margin-bottom: 10px;
-      padding: 10px;
-      background-color: #f9f9f9;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: background-color 0.2s;
-    }
-    .room-item:hover, .timer-item:hover {
-      background-color: #e9e9e9;
-    }
-    .room-item.selected, .timer-item.selected {
-      background-color: #d1e7dd;
-      border-left: 4px solid #198754;
-    }
-    .form-group {
-      margin-bottom: 15px;
-    }
-    label {
-      display: block;
-      margin-bottom: 5px;
-      font-weight: 500;
-    }
-    input, button, select {
-      width: 100%;
-      padding: 8px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      box-sizing: border-box;
-    }
-    button {
-      background-color: #0d6efd;
-      color: white;
-      border: none;
-      cursor: pointer;
-      padding: 10px;
-      font-weight: 500;
-      transition: background-color 0.2s;
-    }
-    button:hover {
-      background-color: #0b5ed7;
-    }
-    button:disabled {
-      background-color: #6c757d;
-      cursor: not-allowed;
-    }
-    .timer-controls {
-      display: flex;
-      gap: 10px;
-      margin-top: 10px;
-    }
-    .start-btn {
-      background-color: #198754;
-    }
-    .start-btn:hover {
-      background-color: #157347;
-    }
-    .pause-btn {
-      background-color: #fd7e14;
-    }
-    .pause-btn:hover {
-      background-color: #e56e06;
-    }
-    .stop-btn {
-      background-color: #dc3545;
-    }
-    .stop-btn:hover {
-      background-color: #bb2d3b;
-    }
-    #connection-status {
-      padding: 8px 12px;
-      border-radius: 4px;
-      margin-bottom: 20px;
-      font-weight: 500;
-      text-align: center;
-    }
-    .connected {
-      background-color: #d1e7dd;
-      color: #0f5132;
-    }
-    .disconnected {
-      background-color: #f8d7da;
-      color: #842029;
-    }
-    .connecting {
-      background-color: #fff3cd;
-      color: #664d03;
-    }
-    .log-container {
-      margin-top: 20px;
-      background-color: #f8f9fa;
-      border: 1px solid #dee2e6;
-      border-radius: 4px;
-      padding: 10px;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    .log-entry {
-      margin-bottom: 5px;
-      font-family: monospace;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    .room-details {
-      padding: 10px;
-      background-color: #e9ecef;
-      border-radius: 4px;
-      margin-bottom: 15px;
-    }
-    .timer-progress {
-      height: 20px;
-      background-color: #e9ecef;
-      border-radius: 4px;
-      margin-bottom: 5px;
-      overflow: hidden;
-    }
-    .timer-progress-bar {
-      height: 100%;
-      background-color: #0d6efd;
-      transition: width 1s linear;
-    }
-    .timer-details {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.9rem;
-    }
-    .badge {
-      display: inline-block;
-      padding: 3px 6px;
-      border-radius: 4px;
-      font-size: 0.8rem;
-      font-weight: 500;
-      margin-left: 5px;
-    }
-    .badge-success {
-      background-color: #d1e7dd;
-      color: #0f5132;
-    }
-    .badge-warning {
-      background-color: #fff3cd;
-      color: #664d03;
-    }
-    .badge-danger {
-      background-color: #f8d7da;
-      color: #842029;
-    }
-    .badge-info {
-      background-color: #cff4fc;
-      color: #055160;
-    }
-  </style>
+  <!-- Load Tailwind with DaisyUI plugin -->
+  <script src="https://cdn.tailwindcss.com?plugins=daisyui"></script>
 </head>
-<body>
-  <h1>Timer App Test Client</h1>
+<body class="bg-gray-100 p-4 md:p-8">
+  <h1 class="text-3xl font-bold text-gray-800 mb-4">Timer App Test Client</h1>
   
-  <div id="connection-status" class="disconnected">Disconnected</div>
+  <div id="connection-status" class="alert alert-error mb-4 text-center">
+    Disconnected
+  </div>
   
-  <div class="form-group">
-    <label for="server-url">WebSocket Server URL</label>
-    <div style="display: flex; gap: 10px;">
-      <input type="text" id="server-url" value="wss://simple-timers-wss.onrender.com" placeholder="ws://localhost:8080">
-      <button id="connect-btn" style="width: auto;">Connect</button>
-      <button id="disconnect-btn" style="width: auto;" disabled>Disconnect</button>
+  <div class="mb-4">
+    <label for="server-url" class="label">WebSocket Server URL</label>
+    <div class="flex gap-2">
+      <input type="text" id="server-url" value="wss://simple-timers-wss.onrender.com" placeholder="ws://localhost:8080" class="input input-bordered flex-1">
+      <button id="connect-btn" class="btn btn-primary">Connect</button>
+      <button id="disconnect-btn" class="btn btn-primary" disabled>Disconnect</button>
     </div>
   </div>
   
-  <div class="container">
-    <div class="left-panel">
-      <h2>Rooms</h2>
+  <!-- Responsive container: stacks on mobile, side-by-side on md+ -->
+  <div class="flex flex-col md:flex-row gap-4">
+    <!-- Left Panel: Rooms -->
+    <div class="flex-1 card bg-white shadow p-6">
+      <h2 class="card-title mb-4">Rooms</h2>
       
-      <div id="create-room-form">
-        <h3>Create Room</h3>
-        <div class="form-group">
-          <label for="room-name">Room Name</label>
-          <input type="text" id="room-name" placeholder="My Room">
+      <div id="create-room-form" class="mb-6">
+        <h3 class="text-xl font-semibold mb-2">Create Room</h3>
+        <div class="mb-4">
+          <label for="room-name" class="label">Room Name</label>
+          <input type="text" id="room-name" placeholder="My Room" class="input input-bordered w-full">
         </div>
-        <div class="form-group">
-          <label for="room-password">Password (optional)</label>
-          <input type="password" id="room-password" placeholder="Leave empty for no password">
+        <div class="mb-4">
+          <label for="room-password" class="label">Password (optional)</label>
+          <input type="password" id="room-password" placeholder="Leave empty for no password" class="input input-bordered w-full">
         </div>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="room-public" checked>
-            Public Room
+        <div class="form-control mb-4">
+          <label class="cursor-pointer label">
+            <span class="label-text">Public Room</span> 
+            <input type="checkbox" id="room-public" class="checkbox" checked>
           </label>
         </div>
-        <button id="create-room-btn" disabled>Create Room</button>
+        <button id="create-room-btn" class="btn btn-primary" disabled>Create Room</button>
       </div>
       
-      <div id="join-room-form" style="margin-top: 20px;">
-        <h3>Join Room</h3>
-        <div class="form-group">
-          <label for="join-room-password">Password (if required)</label>
-          <input type="password" id="join-room-password" placeholder="Enter room password">
+      <div id="join-room-form" class="mb-6">
+        <h3 class="text-xl font-semibold mb-2">Join Room</h3>
+        <div class="mb-4">
+          <label for="join-room-password" class="label">Password (if required)</label>
+          <input type="password" id="join-room-password" placeholder="Enter room password" class="input input-bordered w-full">
         </div>
-        <div class="form-group">
-          <label for="join-invite-token">Invite Token (if available)</label>
-          <input type="text" id="join-invite-token" placeholder="Enter invite token">
+        <div class="mb-4">
+          <label for="join-invite-token" class="label">Invite Token (if available)</label>
+          <input type="text" id="join-invite-token" placeholder="Enter invite token" class="input input-bordered w-full">
         </div>
-        <button id="join-room-btn" disabled>Join Selected Room</button>
-        <button id="leave-room-btn" disabled>Leave Current Room</button>
+        <div class="flex gap-2">
+          <button id="join-room-btn" class="btn btn-primary" disabled>Join Selected Room</button>
+          <button id="leave-room-btn" class="btn btn-primary" disabled>Leave Current Room</button>
+        </div>
       </div>
       
-      <h3>Available Rooms</h3>
-      <div id="room-list" class="room-list">
-        <div class="room-item">Loading rooms...</div>
+      <h3 class="text-xl font-semibold mb-2">Available Rooms</h3>
+      <div id="room-list" class="max-h-72 overflow-y-auto">
+        <div class="p-2 bg-base-200 rounded">Loading rooms...</div>
       </div>
     </div>
     
-    <div class="right-panel">
-      <div id="current-room-info">
-        <h2>Current Room: <span id="current-room-name">None</span></h2>
-        <div id="room-details" class="room-details" style="display: none;">
+    <!-- Right Panel: Timers -->
+    <div class="flex-1 card bg-white shadow p-6">
+      <div id="current-room-info" class="mb-6">
+        <h2 class="text-2xl font-semibold mb-2">Current Room: <span id="current-room-name" class="font-normal">None</span></h2>
+        <div id="room-details" class="bg-base-200 p-4 rounded hidden">
           <div><strong>Room ID:</strong> <span id="current-room-id"></span></div>
           <div><strong>Invite Token:</strong> <span id="current-room-token"></span></div>
         </div>
       </div>
       
-      <div id="create-timer-form">
-        <h3>Create Timer</h3>
-        <div class="form-group">
-          <label for="timer-name">Timer Name</label>
-          <input type="text" id="timer-name" placeholder="My Timer">
+      <div id="create-timer-form" class="mb-6">
+        <h3 class="text-xl font-semibold mb-2">Create Timer</h3>
+        <div class="mb-4">
+          <label for="timer-name" class="label">Timer Name</label>
+          <input type="text" id="timer-name" placeholder="My Timer" class="input input-bordered w-full">
         </div>
-        <div class="form-group">
-          <label for="timer-duration">Duration (seconds)</label>
-          <input type="number" id="timer-duration" value="60" min="1">
+        <div class="mb-4">
+          <label for="timer-duration" class="label">Duration (seconds)</label>
+          <input type="number" id="timer-duration" value="60" min="1" class="input input-bordered w-full">
         </div>
-        <button id="create-timer-btn" disabled>Create Timer</button>
+        <button id="create-timer-btn" class="btn btn-primary" disabled>Create Timer</button>
       </div>
       
-      <h3>Active Timers</h3>
-      <div id="timer-list" class="timer-list">
-        <div class="timer-item">Join a room to see timers</div>
+      <h3 class="text-xl font-semibold mb-2">Active Timers</h3>
+      <div id="timer-list" class="max-h-72 overflow-y-auto">
+        <div class="p-2 bg-base-200 rounded">Join a room to see timers</div>
       </div>
     </div>
   </div>
   
-  <h3>Connection Log</h3>
-  <div id="log-container" class="log-container">
-    <div class="log-entry">Waiting for connection...</div>
+  <h3 class="text-xl font-semibold mt-6 mb-2">Connection Log</h3>
+  <div id="log-container" class="bg-base-100 border border-base-300 rounded p-4 max-h-40 overflow-y-auto">
+    <div class="font-mono">Waiting for connection...</div>
   </div>
   
   <script>
@@ -322,25 +153,21 @@
       function logMessage(message, data = null) {
         const now = new Date().toLocaleTimeString();
         const logEntry = document.createElement('div');
-        logEntry.className = 'log-entry';
-        if (data) {
-          let displayData;
-          try {
-            displayData = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
-          } catch (e) {
-            displayData = String(data);
-          }
-          logEntry.textContent = `[${now}] ${message}: ${displayData}`;
-        } else {
-          logEntry.textContent = `[${now}] ${message}`;
-        }
+        logEntry.className = 'font-mono';
+        logEntry.textContent = data ? `[${now}] ${message}: ${JSON.stringify(data, null, 2)}` : `[${now}] ${message}`;
         logContainer.appendChild(logEntry);
         logContainer.scrollTop = logContainer.scrollHeight;
       }
       
       function updateConnectionStatus(status) {
         connectionStatus.textContent = status;
-        connectionStatus.className = status.toLowerCase().replace(' ', '-');
+        if (status.toLowerCase() === 'connected') {
+          connectionStatus.className = 'alert alert-success mb-4 text-center';
+        } else if (status.toLowerCase() === 'connecting') {
+          connectionStatus.className = 'alert alert-warning mb-4 text-center';
+        } else {
+          connectionStatus.className = 'alert alert-error mb-4 text-center';
+        }
       }
       
       function formatTime(seconds) {
@@ -354,7 +181,7 @@
           case 'created': return '<span class="badge badge-info">Created</span>';
           case 'running': return '<span class="badge badge-success">Running</span>';
           case 'paused': return '<span class="badge badge-warning">Paused</span>';
-          case 'completed': return '<span class="badge badge-danger">Completed</span>';
+          case 'completed': return '<span class="badge badge-error">Completed</span>';
           default: return `<span class="badge">${status}</span>`;
         }
       }
@@ -363,16 +190,16 @@
         roomList.innerHTML = '';
         if (!rooms || rooms.length === 0) {
           const emptyItem = document.createElement('div');
-          emptyItem.className = 'room-item';
+          emptyItem.className = 'p-2 bg-base-200 rounded';
           emptyItem.textContent = 'No rooms available';
           roomList.appendChild(emptyItem);
           return;
         }
         rooms.forEach(room => {
           const roomItem = document.createElement('div');
-          roomItem.className = 'room-item';
+          roomItem.className = 'p-2 bg-base-200 rounded mb-2 cursor-pointer hover:bg-base-300';
           if (selectedRoomId === room.id) {
-            roomItem.classList.add('selected');
+            roomItem.classList.add('bg-success', 'border-l-4', 'border-success');
           }
           roomItem.setAttribute('data-room-id', room.id);
           
@@ -388,8 +215,10 @@
           roomItem.appendChild(roomInfo);
           
           roomItem.addEventListener('click', () => {
-            document.querySelectorAll('.room-item.selected').forEach(el => el.classList.remove('selected'));
-            roomItem.classList.add('selected');
+            document.querySelectorAll('[data-room-id].bg-success').forEach(el => {
+              el.classList.remove('bg-success', 'border-l-4', 'border-success');
+            });
+            roomItem.classList.add('bg-success', 'border-l-4', 'border-success');
             selectedRoomId = room.id;
             joinRoomBtn.disabled = currentRoomId === selectedRoomId;
           });
@@ -402,21 +231,21 @@
         timerList.innerHTML = '';
         if (!currentRoomId) {
           const emptyItem = document.createElement('div');
-          emptyItem.className = 'timer-item';
+          emptyItem.className = 'p-2 bg-base-200 rounded';
           emptyItem.textContent = 'Join a room to see timers';
           timerList.appendChild(emptyItem);
           return;
         }
         if (roomTimers.length === 0) {
           const emptyItem = document.createElement('div');
-          emptyItem.className = 'timer-item';
+          emptyItem.className = 'p-2 bg-base-200 rounded';
           emptyItem.textContent = 'No timers in this room';
           timerList.appendChild(emptyItem);
           return;
         }
         roomTimers.forEach(timer => {
           const timerItem = document.createElement('div');
-          timerItem.className = 'timer-item';
+          timerItem.className = 'p-4 bg-base-100 rounded mb-4';
           timerItem.setAttribute('data-timer-id', timer.id);
           
           // Header with timer name and status badge
@@ -425,32 +254,30 @@
           
           // Progress bar
           const progressContainer = document.createElement('div');
-          progressContainer.className = 'timer-progress';
+          progressContainer.className = 'w-full bg-base-300 rounded h-4 my-2';
           const progressBar = document.createElement('div');
-          progressBar.className = 'timer-progress-bar';
+          progressBar.className = 'bg-primary h-4 rounded';
           const progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
           progressBar.style.width = `${progressPercent}%`;
           progressContainer.appendChild(progressBar);
           
           // Timer details
           const detailsDiv = document.createElement('div');
-          detailsDiv.className = 'timer-details';
+          detailsDiv.className = 'flex justify-between text-sm';
           detailsDiv.innerHTML = `<div>Total: ${formatTime(timer.duration)}</div><div class="timer-remaining">${formatTime(timer.remaining)}</div>`;
           
-          // Create controls container for this timer
+          // Controls: toggle (start/pause) and reset
           const controlsDiv = document.createElement('div');
-          controlsDiv.className = 'timer-controls';
+          controlsDiv.className = 'flex gap-2 mt-2';
           
-          // Toggle button (start/pause)
           const toggleBtn = document.createElement('button');
           if (timer.status === 'running') {
             toggleBtn.textContent = 'Pause';
-            toggleBtn.className = 'pause-btn';
+            toggleBtn.className = 'btn btn-warning btn-sm';
           } else {
             toggleBtn.textContent = 'Start';
-            toggleBtn.className = 'start-btn';
+            toggleBtn.className = 'btn btn-success btn-sm';
           }
-          // When clicked, decide action based on current button text.
           toggleBtn.addEventListener('click', () => {
             if (toggleBtn.textContent === 'Pause') {
               const message = { type: 'pause_timer', timerId: timer.id };
@@ -463,20 +290,18 @@
             }
           });
           
-          // Stop/Reset button
-          const stopBtn = document.createElement('button');
-          stopBtn.textContent = 'Reset';
-          stopBtn.className = 'stop-btn';
-          stopBtn.addEventListener('click', () => {
+          const resetBtn = document.createElement('button');
+          resetBtn.textContent = 'Reset';
+          resetBtn.className = 'btn btn-error btn-sm';
+          resetBtn.addEventListener('click', () => {
             const message = { type: 'stop_timer', timerId: timer.id };
             ws.send(JSON.stringify(message));
             logMessage('Resetting timer', message);
           });
           
           controlsDiv.appendChild(toggleBtn);
-          controlsDiv.appendChild(stopBtn);
+          controlsDiv.appendChild(resetBtn);
           
-          // Append all parts to timer item
           timerItem.appendChild(headerDiv);
           timerItem.appendChild(progressContainer);
           timerItem.appendChild(detailsDiv);
@@ -484,17 +309,39 @@
           
           timerList.appendChild(timerItem);
           
-          // If timer is running and an update interval isn’t already set, start it.
+          // Start an interval if timer is running and not already set
           if (timer.status === 'running' && !timerIntervals[timer.id]) {
             startTimerInterval(timer);
           }
         });
       }
       
+      // FIXED: Use a captured startRemaining value so that when resuming the timer it doesn’t start over.
+      function startTimerInterval(timer) {
+        if (timerIntervals[timer.id]) {
+          clearInterval(timerIntervals[timer.id]);
+        }
+        if (timer.status !== 'running') return;
+        
+        let startRemaining = timer.remaining; // capture the current remaining value
+        const startTime = Date.now();
+        timerIntervals[timer.id] = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          const newRemaining = Math.max(0, startRemaining - elapsed);
+          const updatedTimer = { ...timer, remaining: newRemaining };
+          updateTimerDisplay(updatedTimer);
+          if (newRemaining <= 0) {
+            updatedTimer.status = 'completed';
+            clearInterval(timerIntervals[timer.id]);
+            delete timerIntervals[timer.id];
+          }
+        }, 1000);
+      }
+      
       function updateTimerDisplay(timer) {
-        const timerElement = document.querySelector(`.timer-item[data-timer-id="${timer.id}"]`);
+        const timerElement = document.querySelector(`[data-timer-id="${timer.id}"]`);
         if (!timerElement) return;
-        const progressBar = timerElement.querySelector('.timer-progress-bar');
+        const progressBar = timerElement.querySelector('.bg-primary');
         const remainingTimeElement = timerElement.querySelector('.timer-remaining');
         const statusElement = timerElement.querySelector('.timer-status');
         
@@ -503,41 +350,16 @@
         remainingTimeElement.textContent = formatTime(timer.remaining);
         statusElement.innerHTML = getStatusBadge(timer.status);
         
-        // Update the toggle button's text and style.
-        const toggleBtn = timerElement.querySelector('.start-btn, .pause-btn');
+        const toggleBtn = timerElement.querySelector('button.btn-success, button.btn-warning');
         if (toggleBtn) {
           if (timer.status === 'running') {
             toggleBtn.textContent = 'Pause';
-            toggleBtn.classList.remove('start-btn');
-            toggleBtn.classList.add('pause-btn');
+            toggleBtn.className = 'btn btn-warning btn-sm';
           } else {
             toggleBtn.textContent = 'Start';
-            toggleBtn.classList.remove('pause-btn');
-            toggleBtn.classList.add('start-btn');
+            toggleBtn.className = 'btn btn-success btn-sm';
           }
         }
-      }
-      
-      function startTimerInterval(timer) {
-        if (timerIntervals[timer.id]) {
-          clearInterval(timerIntervals[timer.id]);
-        }
-        if (timer.status !== 'running') return;
-        
-        let remaining = timer.remaining;
-        const duration = timer.duration;
-        const startTime = Date.now();
-        timerIntervals[timer.id] = setInterval(() => {
-          const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          remaining = Math.max(0, timer.remaining - elapsed);
-          const updatedTimer = { ...timer, remaining };
-          if (remaining <= 0) {
-            updatedTimer.status = 'completed';
-            clearInterval(timerIntervals[timer.id]);
-            delete timerIntervals[timer.id];
-          }
-          updateTimerDisplay(updatedTimer);
-        }, 1000);
       }
       
       function updateUIForRoomJoined(room) {
@@ -545,16 +367,15 @@
         currentRoomName.textContent = room.name;
         currentRoomIdElement.textContent = room.id;
         currentRoomToken.textContent = room.invite_token || 'None';
-        roomDetails.style.display = 'block';
+        roomDetails.classList.remove('hidden');
         leaveRoomBtn.disabled = false;
         createTimerBtn.disabled = false;
         joinRoomBtn.disabled = true;
-        document.querySelectorAll('.room-item').forEach(el => {
-          if (el.getAttribute('data-room-id') === room.id) {
-            el.classList.add('selected');
-            selectedRoomId = room.id;
+        document.querySelectorAll('[data-room-id].bg-success').forEach(el => {
+          if (el.getAttribute('data-room-id') !== room.id) {
+            el.classList.remove('bg-success', 'border-l-4', 'border-success');
           } else {
-            el.classList.remove('selected');
+            el.classList.add('bg-success', 'border-l-4', 'border-success');
           }
         });
       }
@@ -562,7 +383,7 @@
       function updateUIForRoomLeft() {
         currentRoomId = null;
         currentRoomName.textContent = 'None';
-        roomDetails.style.display = 'none';
+        roomDetails.classList.add('hidden');
         leaveRoomBtn.disabled = true;
         createTimerBtn.disabled = true;
         joinRoomBtn.disabled = !selectedRoomId;
@@ -687,7 +508,6 @@
               logMessage('Error parsing message', error.message);
             }
           };
-          // Ping every 20 seconds
           const pingInterval = setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({ type: 'ping' }));
@@ -709,7 +529,7 @@
         }
       }
       
-      // Event listeners for room and timer creation/joining
+      // Event listeners
       connectBtn.addEventListener('click', connectToServer);
       disconnectBtn.addEventListener('click', disconnectFromServer);
       
@@ -802,7 +622,6 @@
         logMessage('Creating timer', message);
       });
       
-      // Auto-connect if URL is set
       if (serverUrlInput.value) {
         connectBtn.click();
       }
