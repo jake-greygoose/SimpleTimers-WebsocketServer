@@ -16,18 +16,31 @@
       background-color: #374151 !important; /* Tailwind gray-700 */
       border-left: 4px solid #1e293b !important; /* Tailwind blue-gray-800 */
     }
+    .current-room {
+      background-color: #1f2937 !important; /* Darker background */
+      border-left: 4px solid #3b82f6 !important; /* Blue border */
+      position: relative;
+    }
+    .current-room::after {
+      content: "👉";
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
     button:disabled {
       opacity: 0.6;
       cursor: not-allowed;
+    }
+    /* Fix iOS zoom */
+    input[type="text"], input[type="password"], input[type="number"] {
+      font-size: 16px !important; /* Prevent iOS zoom on focus */
     }
     /* Mobile overflow fixes */
     @media (max-width: 640px) {
       .mobile-container {
         max-width: 100%;
         padding: 0.5rem;
-      }
-      .mobile-input {
-        font-size: 16px; /* Prevent iOS zoom on focus */
       }
     }
   </style>
@@ -65,14 +78,14 @@
         
         <div class="collapse collapse-arrow mb-4">
           <input type="checkbox" class="peer"> 
-          <div class="collapse-title bg-gray-700 rounded-lg text-base sm:text-lg font-semibold">
+          <div class="collapse-title bg-gray-700 rounded-t-lg text-base sm:text-lg font-semibold">
             Create Room
           </div>
           <div class="collapse-content bg-gray-700 rounded-b-lg pt-2"> 
             <div id="create-room-form" class="p-2">
               <div class="mb-2 sm:mb-4">
                 <label for="room-name" class="label text-sm sm:text-base p-1">Room Name</label>
-                <input type="text" id="room-name" placeholder="My Room" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base mobile-input">
+                <input type="text" id="room-name" placeholder="My Room" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
               </div>
               <div class="mb-2 sm:mb-4">
                 <label for="room-password" class="label text-sm sm:text-base p-1">Password (optional)</label>
@@ -91,7 +104,7 @@
         
         <div class="collapse collapse-arrow mb-4">
           <input type="checkbox" class="peer"> 
-          <div class="collapse-title bg-gray-700 rounded-lg text-base sm:text-lg font-semibold">
+          <div class="collapse-title bg-gray-700 rounded-t-lg text-base sm:text-lg font-semibold">
             Join Room
           </div>
           <div class="collapse-content bg-gray-700 rounded-b-lg pt-2">
@@ -138,7 +151,7 @@
         
         <div class="collapse collapse-arrow mb-4">
           <input type="checkbox" class="peer"> 
-          <div class="collapse-title bg-gray-700 rounded-lg text-base sm:text-lg font-semibold">
+          <div class="collapse-title bg-gray-700 rounded-t-lg text-base sm:text-lg font-semibold">
             Create Timer
           </div>
           <div class="collapse-content bg-gray-700 rounded-b-lg pt-2">
@@ -168,7 +181,7 @@
     
     <div class="collapse collapse-arrow mt-4">
       <input type="checkbox" class="peer"> 
-      <div class="collapse-title bg-gray-800 rounded-lg text-base sm:text-lg font-semibold">
+      <div class="collapse-title bg-gray-800 rounded-t-lg text-base sm:text-lg font-semibold">
         Connection Log
       </div>
       <div class="collapse-content bg-gray-800 rounded-b-lg pt-2">
@@ -447,13 +460,14 @@
         leaveRoomBtn.disabled = false;
         createTimerBtn.disabled = false;
         joinRoomBtn.disabled = true;
-        document.querySelectorAll('[data-room-id].selected-room').forEach(el => {
-          if (el.getAttribute('data-room-id') !== room.id) {
-            el.classList.remove('selected-room');
-          } else {
-            el.classList.add('selected-room');
-          }
+        document.querySelectorAll('[data-room-id].selected-room, [data-room-id].current-room').forEach(el => {
+          el.classList.remove('selected-room');
+          el.classList.remove('current-room');
         });
+        const currentRoomElement = document.querySelector(`[data-room-id="${room.id}"]`);
+        if (currentRoomElement) {
+          currentRoomElement.classList.add('current-room');
+        }
       }
       
       function updateUIForRoomLeft() {
