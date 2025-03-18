@@ -102,38 +102,60 @@
           </div>
         </div>
         
-        <div class="collapse collapse-arrow mb-4">
-          <input type="checkbox" class="peer"> 
-          <div class="collapse-title bg-gray-700 rounded-t-lg text-base sm:text-lg font-semibold">
-            Join Room
-          </div>
-          <div class="collapse-content bg-gray-700 rounded-b-lg pt-2">
-            <div id="join-room-form" class="p-2">
-              <div class="mb-2 sm:mb-4">
-                <label for="join-room-password" class="label text-sm sm:text-base p-1">Password (if required)</label>
-                <input type="password" id="join-room-password" placeholder="Enter room password" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base mobile-input">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-base sm:text-lg font-semibold">Available Rooms</h3>
+          <button id="join-private-btn" class="btn btn-primary btn-sm sm:btn-md">
+            <i class="fas fa-lock sm:mr-1"></i>
+            <span class="hidden sm:inline">Join Private Room</span>
+          </button>
+        </div>
+        
+        <div class="mb-3" id="in-room-actions">
+          <button id="leave-room-btn" class="btn btn-outline btn-error btn-sm sm:btn-md w-full" disabled>
+            <i class="fas fa-sign-out-alt sm:mr-1"></i>
+            <span class="inline">Leave Current Room</span>
+          </button>
+        </div>
+        
+        <div id="room-list" class="max-h-48 sm:max-h-72 overflow-y-auto rounded-lg mb-4">
+          <div class="p-2 bg-gray-700 rounded text-sm sm:text-base">Loading rooms...</div>
+        </div>
+        
+        <!-- Modal for joining private rooms -->
+        <div id="join-private-modal" class="modal">
+          <div class="modal-box bg-gray-800">
+            <h3 class="font-bold text-lg mb-4">Join Private Room</h3>
+            <div id="join-room-form">
+              <div class="tabs tabs-boxed mb-4">
+                <a class="tab tab-active" id="invite-tab">Via Invite</a>
+                <a class="tab" id="password-tab">Via Password</a>
               </div>
-              <div class="mb-2 sm:mb-4">
-                <label for="join-invite-token" class="label text-sm sm:text-base p-1">Invite Token (if available)</label>
-                <input type="text" id="join-invite-token" placeholder="Enter invite token" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base mobile-input">
+              
+              <div id="invite-panel">
+                <div class="mb-4">
+                  <label for="join-invite-token" class="label text-sm sm:text-base p-1">Invite Token</label>
+                  <input type="text" id="join-invite-token" placeholder="Enter invite token" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
+                </div>
               </div>
-              <div class="flex gap-2 flex-wrap">
-                <button id="join-room-btn" class="btn btn-primary btn-sm sm:btn-md flex-1" disabled>
-                  <i class="fas fa-sign-in-alt sm:mr-1"></i>
-                  <span class="hidden sm:inline">Join</span>
-                </button>
-                <button id="leave-room-btn" class="btn btn-primary btn-sm sm:btn-md flex-1" disabled>
-                  <i class="fas fa-sign-out-alt sm:mr-1"></i>
-                  <span class="hidden sm:inline">Leave</span>
-                </button>
+              
+              <div id="password-panel" class="hidden">
+                <div class="mb-4">
+                  <label for="join-room-id" class="label text-sm sm:text-base p-1">Room ID</label>
+                  <input type="text" id="join-room-id" placeholder="Enter room ID" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
+                </div>
+                <div class="mb-4">
+                  <label for="join-room-password" class="label text-sm sm:text-base p-1">Password</label>
+                  <input type="password" id="join-room-password" placeholder="Enter room password" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
+                </div>
+              </div>
+              
+              <div class="modal-action">
+                <button id="join-private-room-btn" class="btn btn-primary">Join Room</button>
+                <button id="cancel-join-btn" class="btn">Cancel</button>
               </div>
             </div>
           </div>
-        </div>
-        
-        <h3 class="text-base sm:text-lg font-semibold mb-2">Available Rooms</h3>
-        <div id="room-list" class="max-h-48 sm:max-h-72 overflow-y-auto rounded-lg">
-          <div class="p-2 bg-gray-700 rounded text-sm sm:text-base">Loading rooms...</div>
+          <div class="modal-backdrop" id="modal-backdrop"></div>
         </div>
       </div>
       
@@ -219,9 +241,18 @@
       const roomPublicCheckbox = document.getElementById('room-public');
       const createRoomBtn = document.getElementById('create-room-btn');
       
+      const joinPrivateBtn = document.getElementById('join-private-btn');
+      const joinPrivateModal = document.getElementById('join-private-modal');
+      const joinRoomIdInput = document.getElementById('join-room-id');
       const joinRoomPasswordInput = document.getElementById('join-room-password');
       const joinInviteTokenInput = document.getElementById('join-invite-token');
-      const joinRoomBtn = document.getElementById('join-room-btn');
+      const joinPrivateRoomBtn = document.getElementById('join-private-room-btn');
+      const cancelJoinBtn = document.getElementById('cancel-join-btn');
+      const modalBackdrop = document.getElementById('modal-backdrop');
+      const inviteTab = document.getElementById('invite-tab');
+      const passwordTab = document.getElementById('password-tab');
+      const invitePanel = document.getElementById('invite-panel');
+      const passwordPanel = document.getElementById('password-panel');
       const leaveRoomBtn = document.getElementById('leave-room-btn');
       
       const roomList = document.getElementById('room-list');
@@ -282,35 +313,97 @@
           roomList.appendChild(emptyItem);
           return;
         }
-        rooms.forEach(room => {
+        
+        // Sort rooms: current room first, then public rooms, then private rooms
+        const sortedRooms = [...rooms].sort((a, b) => {
+          // Current room comes first
+          if (a.id === currentRoomId) return -1;
+          if (b.id === currentRoomId) return 1;
+          
+          const aIsPublic = a.is_public === 1 || a.is_public === true;
+          const bIsPublic = b.is_public === 1 || b.is_public === true;
+          
+          // Then public rooms
+          if (aIsPublic && !bIsPublic) return -1;
+          if (!aIsPublic && bIsPublic) return 1;
+          
+          // Otherwise sort by name
+          return (a.name || '').localeCompare(b.name || '');
+        });
+        
+        sortedRooms.forEach(room => {
           const roomItem = document.createElement('div');
-          roomItem.className = 'p-2 bg-gray-700 rounded mb-1 cursor-pointer hover:bg-gray-600 text-sm sm:text-base';
-          if (selectedRoomId === room.id) {
-            roomItem.classList.add('selected-room');
+          roomItem.className = 'bg-gray-700 rounded mb-2 text-sm sm:text-base';
+          if (room.id === currentRoomId) {
+            roomItem.classList.add('current-room');
           }
           roomItem.setAttribute('data-room-id', room.id);
           
-          const roomName = document.createElement('div');
-          roomName.innerHTML = `<strong>${room.name || 'Unnamed Room'}</strong>`;
+          // Container for room info
+          const roomContent = document.createElement('div');
+          roomContent.className = 'p-2 flex flex-col';
           
-          const roomInfo = document.createElement('div');
+          // Flex container for room header
+          const roomHeader = document.createElement('div');
+          roomHeader.className = 'flex justify-between items-center';
+          
+          // Room name with icon 
           const isPublic = room.is_public === 1 || room.is_public === true;
           const clientCount = room.client_count || 0;
-          roomInfo.textContent = `${isPublic ? '🌐 Public' : '🔒 Private'} • 👥 ${clientCount}`;
-          roomInfo.className = 'text-xs sm:text-sm opacity-80';
+          const roomNameEl = document.createElement('div');
+          roomNameEl.className = 'font-semibold flex items-center gap-1';
+          roomNameEl.innerHTML = `${isPublic ? '<i class="fas fa-globe text-xs"></i>' : '<i class="fas fa-lock text-xs"></i>'} ${room.name || 'Unnamed Room'}`;
           
-          roomItem.appendChild(roomName);
-          roomItem.appendChild(roomInfo);
+          // Status badge
+          const statusBadge = document.createElement('div');
+          if (room.id === currentRoomId) {
+            statusBadge.className = 'badge badge-sm badge-primary';
+            statusBadge.textContent = 'Current';
+          } else {
+            statusBadge.className = 'badge badge-sm badge-ghost';
+            statusBadge.textContent = `${clientCount} users`;
+          }
           
-          roomItem.addEventListener('click', () => {
-            document.querySelectorAll('[data-room-id].selected-room').forEach(el => {
-              el.classList.remove('selected-room');
+          roomHeader.appendChild(roomNameEl);
+          roomHeader.appendChild(statusBadge);
+          roomContent.appendChild(roomHeader);
+          
+          // Room ID (show only if it's not the current room)
+          if (room.id !== currentRoomId) {
+            const roomIdEl = document.createElement('div');
+            roomIdEl.className = 'text-xs opacity-60 mb-2 truncate';
+            roomIdEl.textContent = `ID: ${room.id}`;
+            roomContent.appendChild(roomIdEl);
+          }
+          
+          // Join button (only if not current room)
+          if (room.id !== currentRoomId) {
+            const joinButton = document.createElement('button');
+            joinButton.className = 'btn btn-primary btn-xs w-full mt-1';
+            joinButton.innerHTML = '<i class="fas fa-sign-in-alt mr-1"></i> Join';
+            joinButton.addEventListener('click', (e) => {
+              e.stopPropagation(); // Prevent triggering the parent's click
+              selectedRoomId = room.id;
+              
+              if (isPublic) {
+                // Join public room directly
+                const message = { 
+                  type: 'join_room', 
+                  roomId: room.id 
+                };
+                ws.send(JSON.stringify(message));
+                logMessage('Joining public room', message);
+              } else {
+                // For private rooms, show the modal with password tab active
+                document.getElementById('join-room-id').value = room.id;
+                document.getElementById('password-tab').click();
+                document.getElementById('join-private-modal').classList.add('modal-open');
+              }
             });
-            roomItem.classList.add('selected-room');
-            selectedRoomId = room.id;
-            joinRoomBtn.disabled = currentRoomId === selectedRoomId;
-          });
+            roomContent.appendChild(joinButton);
+          }
           
+          roomItem.appendChild(roomContent);
           roomList.appendChild(roomItem);
         });
       }
@@ -459,14 +552,26 @@
         roomDetails.classList.remove('hidden');
         leaveRoomBtn.disabled = false;
         createTimerBtn.disabled = false;
-        joinRoomBtn.disabled = true;
+        
+        // Close the modal if it's open
+        joinPrivateModal.classList.remove('modal-open');
+        
+        // Update room list to show current room
         document.querySelectorAll('[data-room-id].selected-room, [data-room-id].current-room').forEach(el => {
           el.classList.remove('selected-room');
           el.classList.remove('current-room');
         });
+        
         const currentRoomElement = document.querySelector(`[data-room-id="${room.id}"]`);
         if (currentRoomElement) {
           currentRoomElement.classList.add('current-room');
+        }
+        
+        // If this is a private room that's not in our list, add it
+        const isInList = availableRooms.some(r => r.id === room.id);
+        if (!isInList) {
+          availableRooms.push(room);
+          displayRooms(availableRooms);
         }
       }
       
@@ -476,12 +581,19 @@
         roomDetails.classList.add('hidden');
         leaveRoomBtn.disabled = true;
         createTimerBtn.disabled = true;
-        joinRoomBtn.disabled = !selectedRoomId;
+        selectedRoomId = null;
         roomTimers = [];
         renderTimerList();
+        
+        // Clear any active timers
         Object.keys(timerIntervals).forEach(timerId => {
           clearInterval(timerIntervals[timerId]);
           delete timerIntervals[timerId];
+        });
+        
+        // Update the room list to reflect that we're not in any room
+        document.querySelectorAll('[data-room-id].current-room').forEach(el => {
+          el.classList.remove('current-room');
         });
       }
       
@@ -623,6 +735,7 @@
       connectBtn.addEventListener('click', connectToServer);
       disconnectBtn.addEventListener('click', disconnectFromServer);
       
+      // Create room event
       createRoomBtn.addEventListener('click', () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           alert('Not connected to server');
@@ -646,31 +759,85 @@
         logMessage('Creating room', message);
       });
       
-      joinRoomBtn.addEventListener('click', () => {
+      // Join private room button event (open modal)
+      joinPrivateBtn.addEventListener('click', () => {
+        joinPrivateModal.classList.add('modal-open');
+        inviteTab.click(); // Default to invite tab
+      });
+      
+      // Close modal when backdrop is clicked or cancel button is pressed
+      modalBackdrop.addEventListener('click', () => {
+        joinPrivateModal.classList.remove('modal-open');
+      });
+      
+      cancelJoinBtn.addEventListener('click', () => {
+        joinPrivateModal.classList.remove('modal-open');
+      });
+      
+      // Tab switching in the modal
+      inviteTab.addEventListener('click', () => {
+        inviteTab.classList.add('tab-active');
+        passwordTab.classList.remove('tab-active');
+        invitePanel.classList.remove('hidden');
+        passwordPanel.classList.add('hidden');
+      });
+      
+      passwordTab.addEventListener('click', () => {
+        passwordTab.classList.add('tab-active');
+        inviteTab.classList.remove('tab-active');
+        passwordPanel.classList.remove('hidden');
+        invitePanel.classList.add('hidden');
+      });
+      
+      // Join private room from modal
+      joinPrivateRoomBtn.addEventListener('click', () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           alert('Not connected to server');
           return;
         }
-        if (!selectedRoomId) {
-          alert('Please select a room to join');
-          return;
+        
+        // Check which tab is active
+        const isInviteActive = inviteTab.classList.contains('tab-active');
+        
+        if (isInviteActive) {
+          // Join via invite token
+          const inviteToken = joinInviteTokenInput.value.trim();
+          if (!inviteToken) {
+            alert('Please enter an invite token');
+            return;
+          }
+          
+          const message = {
+            type: 'join_room',
+            inviteToken: inviteToken
+          };
+          ws.send(JSON.stringify(message));
+          logMessage('Joining room via invite token', message);
+        } else {
+          // Join via room ID and password
+          const roomId = joinRoomIdInput.value.trim();
+          const password = joinRoomPasswordInput.value.trim();
+          
+          if (!roomId) {
+            alert('Please enter a room ID');
+            return;
+          }
+          
+          const message = {
+            type: 'join_room',
+            roomId: roomId
+          };
+          
+          if (password) {
+            message.password = password;
+          }
+          
+          ws.send(JSON.stringify(message));
+          logMessage('Joining room via ID and password', message);
         }
-        const message = {
-          type: 'join_room',
-          roomId: selectedRoomId
-        };
-        const password = joinRoomPasswordInput.value.trim();
-        if (password) {
-          message.password = password;
-        }
-        const inviteToken = joinInviteTokenInput.value.trim();
-        if (inviteToken) {
-          message.inviteToken = inviteToken;
-        }
-        ws.send(JSON.stringify(message));
-        logMessage('Joining room', message);
       });
       
+      // Leave room
       leaveRoomBtn.addEventListener('click', () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           alert('Not connected to server');
