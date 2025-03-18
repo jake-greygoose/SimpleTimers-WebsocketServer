@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="night">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,9 +8,20 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Load DaisyUI from CDN -->
   <link href="https://cdn.jsdelivr.net/npm/daisyui@2.51.5/dist/full.css" rel="stylesheet">
+  <style>
+    /* Custom styles for dark theme selections and disabled buttons */
+    .selected-room {
+      background-color: #374151 !important; /* Tailwind gray-700 */
+      border-left: 4px solid #1e293b !important; /* Tailwind blue-gray-800 */
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  </style>
 </head>
-<body class="bg-gray-100 p-4 md:p-8">
-  <h1 class="text-3xl font-bold text-gray-800 mb-4">Timer App Test Client</h1>
+<body class="bg-gray-900 text-gray-100 p-4 md:p-8">
+  <h1 class="text-3xl font-bold text-gray-100 mb-4">Timer App Test Client</h1>
   
   <div id="connection-status" class="alert alert-error mb-4 text-center">
     Disconnected
@@ -19,7 +30,7 @@
   <div class="mb-4">
     <label for="server-url" class="label">WebSocket Server URL</label>
     <div class="flex gap-2">
-      <input type="text" id="server-url" value="wss://simple-timers-wss.onrender.com" placeholder="ws://localhost:8080" class="input input-bordered flex-1">
+      <input type="text" id="server-url" value="wss://simple-timers-wss.onrender.com" placeholder="ws://localhost:8080" class="input input-bordered flex-1 bg-gray-800 border-gray-700 text-gray-100">
       <button id="connect-btn" class="btn btn-primary">Connect</button>
       <button id="disconnect-btn" class="btn btn-primary" disabled>Disconnect</button>
     </div>
@@ -28,18 +39,18 @@
   <!-- Responsive container: stacks on mobile, side-by-side on md+ -->
   <div class="flex flex-col md:flex-row gap-4">
     <!-- Left Panel: Rooms -->
-    <div class="flex-1 card bg-white shadow p-6">
+    <div class="flex-1 card bg-gray-800 shadow p-6">
       <h2 class="card-title mb-4">Rooms</h2>
       
       <div id="create-room-form" class="mb-6">
         <h3 class="text-xl font-semibold mb-2">Create Room</h3>
         <div class="mb-4">
           <label for="room-name" class="label">Room Name</label>
-          <input type="text" id="room-name" placeholder="My Room" class="input input-bordered w-full">
+          <input type="text" id="room-name" placeholder="My Room" class="input input-bordered w-full bg-gray-700 border-gray-600 text-gray-100">
         </div>
         <div class="mb-4">
           <label for="room-password" class="label">Password (optional)</label>
-          <input type="password" id="room-password" placeholder="Leave empty for no password" class="input input-bordered w-full">
+          <input type="password" id="room-password" placeholder="Leave empty for no password" class="input input-bordered w-full bg-gray-700 border-gray-600 text-gray-100">
         </div>
         <div class="form-control mb-4">
           <label class="cursor-pointer label">
@@ -54,11 +65,11 @@
         <h3 class="text-xl font-semibold mb-2">Join Room</h3>
         <div class="mb-4">
           <label for="join-room-password" class="label">Password (if required)</label>
-          <input type="password" id="join-room-password" placeholder="Enter room password" class="input input-bordered w-full">
+          <input type="password" id="join-room-password" placeholder="Enter room password" class="input input-bordered w-full bg-gray-700 border-gray-600 text-gray-100">
         </div>
         <div class="mb-4">
           <label for="join-invite-token" class="label">Invite Token (if available)</label>
-          <input type="text" id="join-invite-token" placeholder="Enter invite token" class="input input-bordered w-full">
+          <input type="text" id="join-invite-token" placeholder="Enter invite token" class="input input-bordered w-full bg-gray-700 border-gray-600 text-gray-100">
         </div>
         <div class="flex gap-2">
           <button id="join-room-btn" class="btn btn-primary" disabled>Join Selected Room</button>
@@ -68,17 +79,17 @@
       
       <h3 class="text-xl font-semibold mb-2">Available Rooms</h3>
       <div id="room-list" class="max-h-72 overflow-y-auto">
-        <div class="p-2 bg-base-200 rounded">Loading rooms...</div>
+        <div class="p-2 bg-gray-700 rounded">Loading rooms...</div>
       </div>
     </div>
     
     <!-- Right Panel: Timers -->
-    <div class="flex-1 card bg-white shadow p-6">
+    <div class="flex-1 card bg-gray-800 shadow p-6">
       <div id="current-room-info" class="mb-6">
         <h2 class="text-2xl font-semibold mb-2">
           Current Room: <span id="current-room-name" class="font-normal">None</span>
         </h2>
-        <div id="room-details" class="bg-base-200 p-4 rounded hidden">
+        <div id="room-details" class="bg-gray-700 p-4 rounded hidden">
           <div><strong>Room ID:</strong> <span id="current-room-id"></span></div>
           <div><strong>Invite Token:</strong> <span id="current-room-token"></span></div>
         </div>
@@ -88,24 +99,24 @@
         <h3 class="text-xl font-semibold mb-2">Create Timer</h3>
         <div class="mb-4">
           <label for="timer-name" class="label">Timer Name</label>
-          <input type="text" id="timer-name" placeholder="My Timer" class="input input-bordered w-full">
+          <input type="text" id="timer-name" placeholder="My Timer" class="input input-bordered w-full bg-gray-700 border-gray-600 text-gray-100">
         </div>
         <div class="mb-4">
           <label for="timer-duration" class="label">Duration (seconds)</label>
-          <input type="number" id="timer-duration" value="60" min="1" class="input input-bordered w-full">
+          <input type="number" id="timer-duration" value="60" min="1" class="input input-bordered w-full bg-gray-700 border-gray-600 text-gray-100">
         </div>
         <button id="create-timer-btn" class="btn btn-primary" disabled>Create Timer</button>
       </div>
       
       <h3 class="text-xl font-semibold mb-2">Active Timers</h3>
       <div id="timer-list" class="max-h-72 overflow-y-auto">
-        <div class="p-2 bg-base-200 rounded">Join a room to see timers</div>
+        <div class="p-2 bg-gray-700 rounded">Join a room to see timers</div>
       </div>
     </div>
   </div>
   
   <h3 class="text-xl font-semibold mt-6 mb-2">Connection Log</h3>
-  <div id="log-container" class="bg-base-100 border border-base-300 rounded p-4 max-h-40 overflow-y-auto">
+  <div id="log-container" class="bg-gray-800 border border-gray-700 rounded p-4 max-h-40 overflow-y-auto">
     <div class="font-mono">Waiting for connection...</div>
   </div>
   
@@ -194,16 +205,16 @@
         roomList.innerHTML = '';
         if (!rooms || rooms.length === 0) {
           const emptyItem = document.createElement('div');
-          emptyItem.className = 'p-2 bg-base-200 rounded';
+          emptyItem.className = 'p-2 bg-gray-700 rounded';
           emptyItem.textContent = 'No rooms available';
           roomList.appendChild(emptyItem);
           return;
         }
         rooms.forEach(room => {
           const roomItem = document.createElement('div');
-          roomItem.className = 'p-2 bg-base-200 rounded mb-2 cursor-pointer hover:bg-base-300';
+          roomItem.className = 'p-2 bg-gray-700 rounded mb-2 cursor-pointer hover:bg-gray-600';
           if (selectedRoomId === room.id) {
-            roomItem.classList.add('bg-success', 'border-l-4', 'border-success');
+            roomItem.classList.add('selected-room');
           }
           roomItem.setAttribute('data-room-id', room.id);
           
@@ -219,10 +230,10 @@
           roomItem.appendChild(roomInfo);
           
           roomItem.addEventListener('click', () => {
-            document.querySelectorAll('[data-room-id].bg-success').forEach(el => {
-              el.classList.remove('bg-success', 'border-l-4', 'border-success');
+            document.querySelectorAll('[data-room-id].selected-room').forEach(el => {
+              el.classList.remove('selected-room');
             });
-            roomItem.classList.add('bg-success', 'border-l-4', 'border-success');
+            roomItem.classList.add('selected-room');
             selectedRoomId = room.id;
             joinRoomBtn.disabled = currentRoomId === selectedRoomId;
           });
@@ -235,21 +246,21 @@
         timerList.innerHTML = '';
         if (!currentRoomId) {
           const emptyItem = document.createElement('div');
-          emptyItem.className = 'p-2 bg-base-200 rounded';
+          emptyItem.className = 'p-2 bg-gray-700 rounded';
           emptyItem.textContent = 'Join a room to see timers';
           timerList.appendChild(emptyItem);
           return;
         }
         if (roomTimers.length === 0) {
           const emptyItem = document.createElement('div');
-          emptyItem.className = 'p-2 bg-base-200 rounded';
+          emptyItem.className = 'p-2 bg-gray-700 rounded';
           emptyItem.textContent = 'No timers in this room';
           timerList.appendChild(emptyItem);
           return;
         }
         roomTimers.forEach(timer => {
           const timerItem = document.createElement('div');
-          timerItem.className = 'p-4 bg-base-100 rounded mb-4';
+          timerItem.className = 'p-4 bg-gray-800 rounded mb-4';
           timerItem.setAttribute('data-timer-id', timer.id);
           
           // Header with timer name and status badge
@@ -258,7 +269,7 @@
           
           // Progress bar
           const progressContainer = document.createElement('div');
-          progressContainer.className = 'w-full bg-base-300 rounded h-4 my-2';
+          progressContainer.className = 'w-full bg-gray-600 rounded h-4 my-2';
           const progressBar = document.createElement('div');
           progressBar.className = 'bg-primary h-4 rounded';
           const progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
@@ -375,11 +386,11 @@
         leaveRoomBtn.disabled = false;
         createTimerBtn.disabled = false;
         joinRoomBtn.disabled = true;
-        document.querySelectorAll('[data-room-id].bg-success').forEach(el => {
+        document.querySelectorAll('[data-room-id].selected-room').forEach(el => {
           if (el.getAttribute('data-room-id') !== room.id) {
-            el.classList.remove('bg-success', 'border-l-4', 'border-success');
+            el.classList.remove('selected-room');
           } else {
-            el.classList.add('bg-success', 'border-l-4', 'border-success');
+            el.classList.add('selected-room');
           }
         });
       }
