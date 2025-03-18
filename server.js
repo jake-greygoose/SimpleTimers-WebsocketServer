@@ -345,6 +345,9 @@ wss.on('connection', async (ws, req) => {
         case 'create_timer':
           await handleCreateTimer(message, ws, clientInfo, now);
           break;
+        case 'delete_timer':
+          await handleDeleteTimer(message, ws, clientInfo);
+          break;
         case 'start_timer':
           await handleStartTimer(message, ws, clientInfo);
           break;
@@ -836,6 +839,45 @@ async function handleUnsubscribeFromTimer(message, ws, clientInfo) {
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to unsubscribe from timer',
+      error: error.message
+    }));
+  }
+}
+
+async function handleDeleteTimer(message, ws, clientInfo) {
+  if (!clientInfo.roomId) {
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'You must join a room before deleting a timer'
+    }));
+    return;
+  }
+  
+  try {
+    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
+    
+    if (!timer || timer.room_id !== clientInfo.roomId) {
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Timer not found in your current room'
+      }));
+      return;
+    }
+    
+    await runQuery(`DELETE FROM timers WHERE id = ?`, [message.timerId]);
+    
+    broadcastToRoom(clientInfo.roomId, {
+      type: 'timer_deleted',
+      timerId: message.timerId
+    });
+    
+    console.log(`Timer ${message.timerId} deleted from room ${clientInfo.roomId}`);
+    
+  } catch (error) {
+    console.error('Error deleting timer:', error);
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Failed to delete timer',
       error: error.message
     }));
   }
