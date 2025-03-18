@@ -402,12 +402,22 @@ wss.on('connection', async (ws, req) => {
 // Room handlers
 
 async function handleJoinRoom(message, ws, clientInfo, now) {
-  const roomId = message.roomId;
+  let roomId = message.roomId;
   const providedPassword = message.password || null;
   const providedInviteToken = message.inviteToken || null;
-
+  
+  let room;
+  
   try {
-    const room = await getOne(`SELECT * FROM rooms WHERE id = ?`, [roomId]);
+    // If no roomId but inviteToken is provided, try to find room by invite token
+    if (!roomId && providedInviteToken) {
+      room = await getOne(`SELECT * FROM rooms WHERE invite_token = ?`, [providedInviteToken]);
+      if (room) {
+        roomId = room.id; // Set roomId if found
+      }
+    } else {
+      room = await getOne(`SELECT * FROM rooms WHERE id = ?`, [roomId]);
+    }
 
     if (!room) {
       return ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
