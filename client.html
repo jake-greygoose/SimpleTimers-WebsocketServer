@@ -4,8 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Timer App Client</title>
-  <!-- Load Tailwind with DaisyUI plugin -->
-  <script src="https://cdn.tailwindcss.com?plugins=daisyui"></script>
+  <!-- Load Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Load DaisyUI from CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@2.51.5/dist/full.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 p-4 md:p-8">
   <h1 class="text-3xl font-bold text-gray-800 mb-4">Timer App Test Client</h1>
@@ -73,7 +75,9 @@
     <!-- Right Panel: Timers -->
     <div class="flex-1 card bg-white shadow p-6">
       <div id="current-room-info" class="mb-6">
-        <h2 class="text-2xl font-semibold mb-2">Current Room: <span id="current-room-name" class="font-normal">None</span></h2>
+        <h2 class="text-2xl font-semibold mb-2">
+          Current Room: <span id="current-room-name" class="font-normal">None</span>
+        </h2>
         <div id="room-details" class="bg-base-200 p-4 rounded hidden">
           <div><strong>Room ID:</strong> <span id="current-room-id"></span></div>
           <div><strong>Invite Token:</strong> <span id="current-room-token"></span></div>
@@ -316,14 +320,14 @@
         });
       }
       
-      // FIXED: Use a captured startRemaining value so that when resuming the timer it doesn’t start over.
+      // Fixed: capture the paused remaining time so the timer resumes from where it left off.
       function startTimerInterval(timer) {
         if (timerIntervals[timer.id]) {
           clearInterval(timerIntervals[timer.id]);
         }
         if (timer.status !== 'running') return;
         
-        let startRemaining = timer.remaining; // capture the current remaining value
+        let startRemaining = timer.remaining; // capture current remaining time at the moment of start
         const startTime = Date.now();
         timerIntervals[timer.id] = setInterval(() => {
           const elapsed = Math.floor((Date.now() - startTime) / 1000);
