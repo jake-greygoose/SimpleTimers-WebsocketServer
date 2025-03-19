@@ -408,6 +408,38 @@
         });
       }
       
+      // IMPROVED: Fixed startTimerInterval function to handle resuming from pause correctly
+      function startTimerInterval(timer) {
+        if (timerIntervals[timer.id]) {
+          clearInterval(timerIntervals[timer.id]);
+        }
+        if (timer.status !== 'running') return;
+        
+        const remaining = timer.remaining;
+        const startTime = Date.now();
+        
+        timerIntervals[timer.id] = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          const newRemaining = Math.max(0, remaining - elapsed);
+          
+          // Update only this timer's display without re-rendering the whole list
+          updateTimerDisplay({ ...timer, remaining: newRemaining });
+          
+          if (newRemaining <= 0) {
+            clearInterval(timerIntervals[timer.id]);
+            delete timerIntervals[timer.id];
+            // Send completed notification to server if needed
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ 
+                type: 'timer_completed', 
+                timerId: timer.id 
+              }));
+            }
+          }
+        }, 100); // More frequent updates for smoother display
+      }
+      
+      // IMPROVED: renderTimerList function to maintain individual timer state
       function renderTimerList() {
         timerList.innerHTML = '';
         if (!currentRoomId) {
@@ -424,6 +456,10 @@
           timerList.appendChild(emptyItem);
           return;
         }
+        
+        // Save current intervals before rebuilding
+        const runningTimerIds = Object.keys(timerIntervals);
+        
         roomTimers.forEach(timer => {
           const timerItem = document.createElement('div');
           timerItem.className = 'p-2 sm:p-4 bg-gray-700 rounded mb-2 text-sm sm:text-base';
@@ -438,7 +474,7 @@
           const progressContainer = document.createElement('div');
           progressContainer.className = 'w-full bg-gray-600 rounded h-2 sm:h-4 my-1 sm:my-2';
           const progressBar = document.createElement('div');
-          progressBar.className = 'bg-primary h-2 sm:h-4 rounded';
+          progressBar.className = 'bg-primary h-2 sm:h-4 rounded transition-all duration-300';
           const progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
           progressBar.style.width = `${progressPercent}%`;
           progressContainer.appendChild(progressBar);
@@ -452,16 +488,22 @@
           const controlsDiv = document.createElement('div');
           controlsDiv.className = 'flex gap-1 sm:gap-2 mt-2';
 
+          // Single toggle button for start/pause
           const toggleBtn = document.createElement('button');
           if (timer.status === 'running') {
             toggleBtn.innerHTML = '<i class="fas fa-pause sm:mr-1"></i><span class="hidden sm:inline">Pause</span>';
             toggleBtn.className = 'btn btn-warning btn-xs sm:btn-sm flex-1';
+            toggleBtn.setAttribute('data-action', 'pause');
           } else {
             toggleBtn.innerHTML = '<i class="fas fa-play sm:mr-1"></i><span class="hidden sm:inline">Start</span>';
             toggleBtn.className = 'btn btn-success btn-xs sm:btn-sm flex-1';
+            toggleBtn.setAttribute('data-action', 'start');
           }
-          toggleBtn.addEventListener('click', () => {
-            if (toggleBtn.querySelector('.fa-pause')) {
+          
+          toggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent event bubbling
+            const action = toggleBtn.getAttribute('data-action');
+            if (action === 'pause') {
               const message = { type: 'pause_timer', timerId: timer.id };
               ws.send(JSON.stringify(message));
               logMessage('Pausing timer', message);
@@ -475,7 +517,8 @@
           const resetBtn = document.createElement('button');
           resetBtn.innerHTML = '<i class="fas fa-redo-alt sm:mr-1"></i><span class="hidden sm:inline">Reset</span>';
           resetBtn.className = 'btn btn-error btn-xs sm:btn-sm flex-1';
-          resetBtn.addEventListener('click', () => {
+          resetBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent event bubbling
             const message = { type: 'stop_timer', timerId: timer.id };
             ws.send(JSON.stringify(message));
             logMessage('Resetting timer', message);
@@ -485,7 +528,8 @@
           const deleteBtn = document.createElement('button');
           deleteBtn.innerHTML = '<i class="fas fa-trash-alt sm:mr-1"></i><span class="hidden sm:inline">Delete</span>';
           deleteBtn.className = 'btn btn-outline btn-error btn-xs sm:btn-sm flex-1';
-          deleteBtn.addEventListener('click', () => {
+          deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent event bubbling
             if (confirm('Are you sure you want to delete this timer?')) {
               const message = { type: 'delete_timer', timerId: timer.id };
               ws.send(JSON.stringify(message));
@@ -495,8 +539,7 @@
 
           controlsDiv.appendChild(toggleBtn);
           controlsDiv.appendChild(resetBtn);
-          controlsDiv.appendChild(deleteBtn); // Add the delete button to the controls
-
+          controlsDiv.appendChild(deleteBtn);
           
           timerItem.appendChild(headerDiv);
           timerItem.appendChild(progressContainer);
@@ -505,38 +548,21 @@
           
           timerList.appendChild(timerItem);
           
-          // Start an interval if timer is running and not already set
-          if (timer.status === 'running' && !timerIntervals[timer.id]) {
-            startTimerInterval(timer);
+          // Start an interval if timer is running
+          if (timer.status === 'running') {
+            // Only start a new interval if it wasn't already running
+            if (!runningTimerIds.includes(timer.id.toString())) {
+              startTimerInterval(timer);
+            }
           }
         });
       }
       
-      // Fixed: capture the paused remaining time so the timer resumes from where it left off.
-      function startTimerInterval(timer) {
-        if (timerIntervals[timer.id]) {
-          clearInterval(timerIntervals[timer.id]);
-        }
-        if (timer.status !== 'running') return;
-        
-        let startRemaining = timer.remaining; // capture current remaining time at the moment of start
-        const startTime = Date.now();
-        timerIntervals[timer.id] = setInterval(() => {
-          const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          const newRemaining = Math.max(0, startRemaining - elapsed);
-          const updatedTimer = { ...timer, remaining: newRemaining };
-          updateTimerDisplay(updatedTimer);
-          if (newRemaining <= 0) {
-            updatedTimer.status = 'completed';
-            clearInterval(timerIntervals[timer.id]);
-            delete timerIntervals[timer.id];
-          }
-        }, 1000);
-      }
-      
+      // IMPROVED: updateTimerDisplay function to only update a specific timer
       function updateTimerDisplay(timer) {
         const timerElement = document.querySelector(`[data-timer-id="${timer.id}"]`);
         if (!timerElement) return;
+        
         const progressBar = timerElement.querySelector('.bg-primary');
         const remainingTimeElement = timerElement.querySelector('.timer-remaining');
         const statusElement = timerElement.querySelector('.timer-status');
@@ -544,17 +570,35 @@
         const progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
         progressBar.style.width = `${progressPercent}%`;
         remainingTimeElement.textContent = formatTime(timer.remaining);
-        statusElement.innerHTML = getStatusBadge(timer.status);
         
-        const toggleBtn = timerElement.querySelector('button.btn-success, button.btn-warning');
+        // Only update status if it's changed
+        if (statusElement.innerHTML !== getStatusBadge(timer.status)) {
+          statusElement.innerHTML = getStatusBadge(timer.status);
+        }
+        
+        // Only update the toggle button if the status has changed
+        const toggleBtn = timerElement.querySelector('button[data-action]');
         if (toggleBtn) {
-          if (timer.status === 'running') {
-            toggleBtn.innerHTML = '<i class="fas fa-pause sm:mr-1"></i><span class="hidden sm:inline">Pause</span>';
-            toggleBtn.className = 'btn btn-warning btn-xs sm:btn-sm flex-1';
-          } else {
-            toggleBtn.innerHTML = '<i class="fas fa-play sm:mr-1"></i><span class="hidden sm:inline">Start</span>';
-            toggleBtn.className = 'btn btn-success btn-xs sm:btn-sm flex-1';
+          const currentAction = toggleBtn.getAttribute('data-action');
+          const newAction = timer.status === 'running' ? 'pause' : 'start';
+          
+          if (currentAction !== newAction) {
+            if (timer.status === 'running') {
+              toggleBtn.innerHTML = '<i class="fas fa-pause sm:mr-1"></i><span class="hidden sm:inline">Pause</span>';
+              toggleBtn.className = 'btn btn-warning btn-xs sm:btn-sm flex-1';
+              toggleBtn.setAttribute('data-action', 'pause');
+            } else {
+              toggleBtn.innerHTML = '<i class="fas fa-play sm:mr-1"></i><span class="hidden sm:inline">Start</span>';
+              toggleBtn.className = 'btn btn-success btn-xs sm:btn-sm flex-1';
+              toggleBtn.setAttribute('data-action', 'start');
+            }
           }
+        }
+        
+        // If timer is completed, clear its interval
+        if (timer.status === 'completed' && timerIntervals[timer.id]) {
+          clearInterval(timerIntervals[timer.id]);
+          delete timerIntervals[timer.id];
         }
       }
       
@@ -634,7 +678,6 @@
             connectBtn.disabled = false;
             disconnectBtn.disabled = true;
             createRoomBtn.disabled = true;
-            joinRoomBtn.disabled = true;
             leaveRoomBtn.disabled = true;
             createTimerBtn.disabled = true;
             updateUIForRoomLeft();
@@ -680,43 +723,76 @@
                   roomTimers.push(message.timer);
                   renderTimerList();
                   break;
+                  
+                // IMPROVED: Updated WebSocket handlers for timer events  
                 case 'timer_started':
                   logMessage('Timer started', message.timer);
-                  roomTimers = roomTimers.map(t => t.id === message.timer.id ? message.timer : t);
-                  renderTimerList();
+                  const startedTimer = message.timer;
+                  // Update the timer in our list
+                  roomTimers = roomTimers.map(t => t.id === startedTimer.id ? startedTimer : t);
+                  // Find the DOM element and update it directly
+                  updateTimerDisplay(startedTimer);
+                  // Start the timer interval
+                  startTimerInterval(startedTimer);
                   break;
+
                 case 'timer_paused':
                   logMessage('Timer paused', message.timer);
-                  if (timerIntervals[message.timer.id]) {
-                    clearInterval(timerIntervals[message.timer.id]);
-                    delete timerIntervals[message.timer.id];
+                  const pausedTimer = message.timer;
+                  // Clear the interval
+                  if (timerIntervals[pausedTimer.id]) {
+                    clearInterval(timerIntervals[pausedTimer.id]);
+                    delete timerIntervals[pausedTimer.id];
                   }
-                  roomTimers = roomTimers.map(t => t.id === message.timer.id ? message.timer : t);
-                  renderTimerList();
+                  // Update the timer in our list
+                  roomTimers = roomTimers.map(t => t.id === pausedTimer.id ? pausedTimer : t);
+                  // Find the DOM element and update it directly
+                  updateTimerDisplay(pausedTimer);
                   break;
+
+                // ADDED: Handler for timer_stopped response from server
+                case 'timer_stopped':
+                  logMessage('Timer stopped/reset', message.timer);
+                  const stoppedTimer = message.timer;
+                  // Clear the interval
+                  if (timerIntervals[stoppedTimer.id]) {
+                    clearInterval(timerIntervals[stoppedTimer.id]);
+                    delete timerIntervals[stoppedTimer.id];
+                  }
+                  // Update the timer in our list
+                  roomTimers = roomTimers.map(t => t.id === stoppedTimer.id ? stoppedTimer : t);
+                  // Find the DOM element and update it directly
+                  updateTimerDisplay(stoppedTimer);
+                  break;
+
                 case 'timer_completed':
                   logMessage('Timer completed', message.timer);
-                  if (timerIntervals[message.timer.id]) {
-                    clearInterval(timerIntervals[message.timer.id]);
-                    delete timerIntervals[message.timer.id];
+                  const completedTimer = message.timer;
+                  // Clear the interval
+                  if (timerIntervals[completedTimer.id]) {
+                    clearInterval(timerIntervals[completedTimer.id]);
+                    delete timerIntervals[completedTimer.id];
                   }
-                  case 'timer_deleted':
-                    logMessage('Timer deleted', message);
-                    // Remove the timer from the list
-                    if (message.timerId) {
-                      // Clear any running interval for this timer
-                      if (timerIntervals[message.timerId]) {
-                        clearInterval(timerIntervals[message.timerId]);
-                        delete timerIntervals[message.timerId];
-                      }
-                      // Filter out the deleted timer
-                      roomTimers = roomTimers.filter(t => t.id !== message.timerId);
-                      // Re-render the timer list
-                      renderTimerList();
+                  // Update the timer in our list
+                  roomTimers = roomTimers.map(t => t.id === completedTimer.id ? completedTimer : t);
+                  // Find the DOM element and update it directly
+                  updateTimerDisplay(completedTimer);
+                  break;
+                  
+                case 'timer_deleted':
+                  logMessage('Timer deleted', message);
+                  // Remove the timer from the list
+                  if (message.timerId) {
+                    // Clear any running interval for this timer
+                    if (timerIntervals[message.timerId]) {
+                      clearInterval(timerIntervals[message.timerId]);
+                      delete timerIntervals[message.timerId];
                     }
-                    break;
-                  roomTimers = roomTimers.map(t => t.id === message.timer.id ? message.timer : t);
-                  renderTimerList();
+                    // Filter out the deleted timer
+                    roomTimers = roomTimers.filter(t => t.id !== message.timerId);
+                    // Re-render the timer list
+                    renderTimerList();
+                  }
                   break;
                 case 'ping':
                   logMessage('Received ping from server');
