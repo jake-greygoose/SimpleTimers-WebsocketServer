@@ -297,6 +297,7 @@
       function getStatusBadge(status) {
         switch(status) {
           case 'created': return '<span class="badge badge-xs sm:badge-sm badge-info">Created</span>';
+          case 'ready': return '<span class="badge badge-xs sm:badge-sm badge-info">Ready</span>';
           case 'running': return '<span class="badge badge-xs sm:badge-sm badge-success">Running</span>';
           case 'paused': return '<span class="badge badge-xs sm:badge-sm badge-warning">Paused</span>';
           case 'completed': return '<span class="badge badge-xs sm:badge-sm badge-error">Completed</span>';
@@ -408,27 +409,44 @@
         });
       }
       
-      // IMPROVED: Fixed startTimerInterval function to handle resuming from pause correctly
+      // IMPROVED: Fixed startTimerInterval function to handle resuming from pause correctly and make animation smoother
       function startTimerInterval(timer) {
         if (timerIntervals[timer.id]) {
           clearInterval(timerIntervals[timer.id]);
         }
         if (timer.status !== 'running') return;
         
-        const remaining = timer.remaining;
+        const remaining = timer.remaining; // seconds
         const startTime = Date.now();
+        const totalDuration = timer.duration * 1000; // convert to ms
+        const remainingMs = remaining * 1000; // convert to ms
         
+        // Update more frequently for smoother animation (every 16ms ≈ 60fps)
         timerIntervals[timer.id] = setInterval(() => {
-          const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          const newRemaining = Math.max(0, remaining - elapsed);
+          const elapsedMs = Date.now() - startTime;
+          const remainingTimeMs = Math.max(0, remainingMs - elapsedMs);
+          const newRemaining = Math.ceil(remainingTimeMs / 1000); // Round up to nearest second for display
+          
+          // For progress bar, use precise ms values for smooth animation
+          const preciseRemaining = remainingTimeMs / 1000; // seconds with decimal precision
           
           // Update only this timer's display without re-rendering the whole list
-          updateTimerDisplay({ ...timer, remaining: newRemaining });
+          updateTimerDisplay({ 
+            ...timer, 
+            remaining: newRemaining,
+            preciseRemaining: preciseRemaining // Add precise value for smoother progress
+          });
           
-          if (newRemaining <= 0) {
+          if (remainingTimeMs <= 0) {
             clearInterval(timerIntervals[timer.id]);
             delete timerIntervals[timer.id];
-            // Send completed notification to server if needed
+            // Mark as completed and update UI
+            updateTimerDisplay({ 
+              ...timer, 
+              remaining: 0,
+              status: 'completed'
+            });
+            // Send completed notification to server
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({ 
                 type: 'timer_completed', 
@@ -436,7 +454,7 @@
               }));
             }
           }
-        }, 100); // More frequent updates for smoother display
+        }, 16); // ~60fps for smooth animation
       }
       
       // IMPROVED: renderTimerList function to maintain individual timer state
@@ -461,6 +479,13 @@
         const runningTimerIds = Object.keys(timerIntervals);
         
         roomTimers.forEach(timer => {
+          // If timer is completed or created, change its status to "ready"
+          // This ensures timers show as "ready" instead of "completed"
+          if (timer.status === 'completed' || timer.status === 'created') {
+            timer.status = 'ready';
+            timer.remaining = timer.duration; // Reset remaining time to full
+          }
+          
           const timerItem = document.createElement('div');
           timerItem.className = 'p-2 sm:p-4 bg-gray-700 rounded mb-2 text-sm sm:text-base';
           timerItem.setAttribute('data-timer-id', timer.id);
@@ -474,8 +499,21 @@
           const progressContainer = document.createElement('div');
           progressContainer.className = 'w-full bg-gray-600 rounded h-2 sm:h-4 my-1 sm:my-2';
           const progressBar = document.createElement('div');
-          progressBar.className = 'bg-primary h-2 sm:h-4 rounded transition-all duration-300';
-          const progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
+          progressBar.className = 'bg-primary h-2 sm:h-4 rounded';
+          progressBar.style.transition = 'width 1s linear';
+          
+          // Set initial progress bar width based on status
+          let progressPercent;
+          if (timer.status === 'running') {
+            progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
+          } else if (timer.status === 'ready') {
+            progressPercent = 100; // Full bar for ready state
+          } else if (timer.status === 'paused') {
+            progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
+          } else {
+            progressPercent = 100; // Default to full bar
+          }
+          
           progressBar.style.width = `${progressPercent}%`;
           progressContainer.appendChild(progressBar);
           
@@ -567,16 +605,48 @@
         const remainingTimeElement = timerElement.querySelector('.timer-remaining');
         const statusElement = timerElement.querySelector('.timer-status');
         
-        const progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
+        // If timer is at 0 remaining, automatically set status to completed
+        if (timer.remaining <= 0 && timer.status === 'running') {
+          timer.status = 'completed';
+          if (timerIntervals[timer.id]) {
+            clearInterval(timerIntervals[timer.id]);
+            delete timerIntervals[timer.id];
+          }
+        }
+        
+        // Set progress bar based on status
+        let progressPercent;
+        if (timer.status === 'running') {
+          // For running timers, use precise remaining time if available (for smoother animation)
+          if (timer.hasOwnProperty('preciseRemaining')) {
+            progressPercent = Math.max(0, Math.min(100, (timer.preciseRemaining / timer.duration) * 100));
+          } else {
+            progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
+          }
+        } else if (timer.status === 'completed' || timer.status === 'ready') {
+          // For completed or ready timers, show full bar
+          progressPercent = 100;
+        } else {
+          // For all other statuses (created, paused), show percentage
+          progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
+        }
+        
         progressBar.style.width = `${progressPercent}%`;
+        
+        // Add high-quality animation for running timers
+        if (timer.status === 'running') {
+          progressBar.style.transition = 'width 1s linear';
+        } else {
+          progressBar.style.transition = 'width 0.3s ease';
+        }
         remainingTimeElement.textContent = formatTime(timer.remaining);
         
-        // Only update status if it's changed
+        // Update status
         if (statusElement.innerHTML !== getStatusBadge(timer.status)) {
           statusElement.innerHTML = getStatusBadge(timer.status);
         }
         
-        // Only update the toggle button if the status has changed
+        // Update the toggle button based on status
         const toggleBtn = timerElement.querySelector('button[data-action]');
         if (toggleBtn) {
           const currentAction = toggleBtn.getAttribute('data-action');
@@ -593,12 +663,6 @@
               toggleBtn.setAttribute('data-action', 'start');
             }
           }
-        }
-        
-        // If timer is completed, clear its interval
-        if (timer.status === 'completed' && timerIntervals[timer.id]) {
-          clearInterval(timerIntervals[timer.id]);
-          delete timerIntervals[timer.id];
         }
       }
       
@@ -759,6 +823,9 @@
                     clearInterval(timerIntervals[stoppedTimer.id]);
                     delete timerIntervals[stoppedTimer.id];
                   }
+                  // Mark as ready instead of completed, with full remaining time
+                  stoppedTimer.status = 'ready';
+                  stoppedTimer.remaining = stoppedTimer.duration;
                   // Update the timer in our list
                   roomTimers = roomTimers.map(t => t.id === stoppedTimer.id ? stoppedTimer : t);
                   // Find the DOM element and update it directly
@@ -773,6 +840,9 @@
                     clearInterval(timerIntervals[completedTimer.id]);
                     delete timerIntervals[completedTimer.id];
                   }
+                  // Mark as ready instead of completed, with full remaining time
+                  completedTimer.status = 'ready';
+                  completedTimer.remaining = completedTimer.duration;
                   // Update the timer in our list
                   roomTimers = roomTimers.map(t => t.id === completedTimer.id ? completedTimer : t);
                   // Find the DOM element and update it directly
