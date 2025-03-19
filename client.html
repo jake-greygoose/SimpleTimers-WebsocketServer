@@ -451,7 +451,7 @@
           // Controls: toggle (start/pause) and reset
           const controlsDiv = document.createElement('div');
           controlsDiv.className = 'flex gap-1 sm:gap-2 mt-2';
-          
+
           const toggleBtn = document.createElement('button');
           if (timer.status === 'running') {
             toggleBtn.innerHTML = '<i class="fas fa-pause sm:mr-1"></i><span class="hidden sm:inline">Pause</span>';
@@ -471,7 +471,7 @@
               logMessage('Starting timer', message);
             }
           });
-          
+
           const resetBtn = document.createElement('button');
           resetBtn.innerHTML = '<i class="fas fa-redo-alt sm:mr-1"></i><span class="hidden sm:inline">Reset</span>';
           resetBtn.className = 'btn btn-error btn-xs sm:btn-sm flex-1';
@@ -480,9 +480,23 @@
             ws.send(JSON.stringify(message));
             logMessage('Resetting timer', message);
           });
-          
+
+          // Add a delete button
+          const deleteBtn = document.createElement('button');
+          deleteBtn.innerHTML = '<i class="fas fa-trash-alt sm:mr-1"></i><span class="hidden sm:inline">Delete</span>';
+          deleteBtn.className = 'btn btn-outline btn-error btn-xs sm:btn-sm flex-1';
+          deleteBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to delete this timer?')) {
+              const message = { type: 'delete_timer', timerId: timer.id };
+              ws.send(JSON.stringify(message));
+              logMessage('Deleting timer', message);
+            }
+          });
+
           controlsDiv.appendChild(toggleBtn);
           controlsDiv.appendChild(resetBtn);
+          controlsDiv.appendChild(deleteBtn); // Add the delete button to the controls
+
           
           timerItem.appendChild(headerDiv);
           timerItem.appendChild(progressContainer);
@@ -686,6 +700,21 @@
                     clearInterval(timerIntervals[message.timer.id]);
                     delete timerIntervals[message.timer.id];
                   }
+                  case 'timer_deleted':
+                    logMessage('Timer deleted', message);
+                    // Remove the timer from the list
+                    if (message.timerId) {
+                      // Clear any running interval for this timer
+                      if (timerIntervals[message.timerId]) {
+                        clearInterval(timerIntervals[message.timerId]);
+                        delete timerIntervals[message.timerId];
+                      }
+                      // Filter out the deleted timer
+                      roomTimers = roomTimers.filter(t => t.id !== message.timerId);
+                      // Re-render the timer list
+                      renderTimerList();
+                    }
+                    break;
                   roomTimers = roomTimers.map(t => t.id === message.timer.id ? message.timer : t);
                   renderTimerList();
                   break;
