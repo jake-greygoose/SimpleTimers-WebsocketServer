@@ -623,11 +623,22 @@ async function handleStartTimer(message, ws, clientInfo) {
       return;
     }
     
+    // Calculate new started_at time for paused timers
+    let newStartedAt = now;
+    
+    if (timer.status === 'paused' && timer.started_at && timer.paused_at) {
+      // Calculate elapsed time before pause
+      const elapsedBeforePause = timer.paused_at - timer.started_at;
+      
+      // Adjust the new start time to account for already elapsed time
+      newStartedAt = now - elapsedBeforePause;
+    }
+    
     await runQuery(`
       UPDATE timers
       SET status = ?, started_at = ?, paused_at = NULL, completed_at = NULL
       WHERE id = ?
-    `, ['running', now, message.timerId]);
+    `, ['running', newStartedAt, message.timerId]);
     
     const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
     
