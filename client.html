@@ -268,14 +268,31 @@
       const timerList = document.getElementById('timer-list');
       
       // Helper functions
-      function logMessage(message, data = null) {
-        const now = new Date().toLocaleTimeString();
-        const logEntry = document.createElement('div');
-        logEntry.className = 'font-mono text-xs sm:text-sm';
-        logEntry.textContent = data ? `[${now}] ${message}: ${JSON.stringify(data, null, 2)}` : `[${now}] ${message}`;
-        logContainer.appendChild(logEntry);
-        logContainer.scrollTop = logContainer.scrollHeight;
-      }
+function logMessage(message, data = null) {
+  const now = new Date().toLocaleTimeString();
+  const logEntry = document.createElement('div');
+  logEntry.className = 'font-mono text-xs sm:text-sm';
+  
+  // Change this part to preserve formatting
+  if (data) {
+    // Create a container with timestamp and message
+    const messageSpan = document.createElement('span');
+    messageSpan.textContent = `[${now}] ${message}: `;
+    logEntry.appendChild(messageSpan);
+    
+    // Create a pre element for the formatted JSON
+    const jsonPre = document.createElement('pre');
+    jsonPre.className = 'mt-1 overflow-x-auto';
+    jsonPre.style.maxHeight = '200px'; // Limit height for very large objects
+    jsonPre.textContent = JSON.stringify(data, null, 2);
+    logEntry.appendChild(jsonPre);
+  } else {
+    logEntry.textContent = `[${now}] ${message}`;
+  }
+  
+  logContainer.appendChild(logEntry);
+  logContainer.scrollTop = logContainer.scrollHeight;
+}
       
       function updateConnectionStatus(status) {
         connectionStatus.textContent = status;
