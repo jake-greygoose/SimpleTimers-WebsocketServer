@@ -341,19 +341,8 @@
           fullscreenTimerList.appendChild(timerItem);
         });
         
-        // Start any running timers in fullscreen mode
-        // But first save the current intervals to preserve timing
-        const runningTimerIds = {};
-        Object.keys(timerIntervals).forEach(timerId => {
-          if (!timerId.startsWith('fs-')) {
-            // For each normal timer interval, find the timer and save its current state
-            const timer = roomTimers.find(t => t.id === timerId);
-            if (timer && timer.status === 'running') {
-              // Use the existing timer with its current remaining time
-              startTimerInterval(timer, true);
-            }
-          }
-        });
+        // No need to start new intervals for fullscreen mode
+        // The existing intervals will update both views
       }
       
       function exitFullscreenMode() {
@@ -362,15 +351,8 @@
         fullscreenContainer.classList.add('hidden');
         fullscreenContainer.classList.remove('fullscreen-mode');
         
-        // Only clear fullscreen intervals, preserve the normal ones
-        Object.keys(timerIntervals).forEach(timerId => {
-          if (timerId.startsWith('fs-')) {
-            clearInterval(timerIntervals[timerId]);
-            delete timerIntervals[timerId];
-          }
-        });
-        
-        // No need to restart timers, just refresh the display
+        // No need to clear or restart intervals since we use a single source
+        // Just refresh the display
         renderTimerList();
       }
       
@@ -537,7 +519,11 @@
       
       // IMPROVED: Fixed startTimerInterval function to handle fullscreen mode
       function startTimerInterval(timer, isFullscreenTimer = false) {
-        const timerId = isFullscreenTimer ? `fs-${timer.id}` : timer.id;
+        // Only start intervals for the normal view, and update both views from there
+        // This prevents timer desync issues between the two views
+        if (isFullscreenTimer) return;
+        
+        const timerId = timer.id;
         
         if (timerIntervals[timerId]) {
           clearInterval(timerIntervals[timerId]);
@@ -569,23 +555,15 @@
             roomTimers[timerIdx].preciseRemaining = preciseRemaining;
           }
           
-          // Update only this timer's display without re-rendering the whole list
+          // Update normal view
           updateTimerDisplay({ 
             ...currentTimer, 
             remaining: newRemaining,
-            preciseRemaining: preciseRemaining // Add precise value for smoother progress
-          }, isFullscreenTimer);
+            preciseRemaining: preciseRemaining
+          }, false);
           
-          // Also update the other view if it exists
-          if (isFullscreenTimer) {
-            // Also update normal view
-            updateTimerDisplay({ 
-              ...currentTimer, 
-              remaining: newRemaining,
-              preciseRemaining: preciseRemaining
-            }, false);
-          } else if (isFullscreen) {
-            // Also update fullscreen view
+          // Also update fullscreen view if active
+          if (isFullscreen) {
             updateTimerDisplay({ 
               ...currentTimer, 
               remaining: newRemaining,
@@ -611,12 +589,9 @@
               roomTimers[idx].status = 'completed';
             }
             
-            updateTimerDisplay(completedTimer, isFullscreenTimer);
-            
-            // Also update the other view
-            if (isFullscreenTimer && !isFullscreen) {
-              updateTimerDisplay(completedTimer, false);
-            } else if (!isFullscreenTimer && isFullscreen) {
+            // Update both views
+            updateTimerDisplay(completedTimer, false);
+            if (isFullscreen) {
               updateTimerDisplay(completedTimer, true);
             }
             
