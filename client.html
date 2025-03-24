@@ -43,10 +43,48 @@
         padding: 0.5rem;
       }
     }
+    
+    /* Fullscreen mode styles */
+    .fullscreen-mode {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 9999;
+      background-color: #1f2937;
+      padding: 1rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .fullscreen-mode #timer-list {
+      flex-grow: 1;
+      max-height: none !important;
+      overflow-y: auto;
+    }
+    
+    .fullscreen-mode .timer-controls {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 1rem;
+    }
+    
+    /* Timer animations for fullscreen */
+    .timer-pulse {
+      animation: pulse 1.5s infinite;
+    }
+    
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
+    }
   </style>
 </head>
 <body class="bg-gray-900 text-gray-100 p-2 sm:p-4 md:p-8 w-full">
-  <div class="max-w-5xl mx-auto">
+  <div class="max-w-5xl mx-auto" id="app-container">
     <h1 class="text-2xl sm:text-3xl font-bold text-gray-100 mb-4 text-center sm:text-left">Timer App</h1>
     
     <div id="connection-status" class="alert alert-error mb-4 text-center text-sm sm:text-base">
@@ -117,7 +155,7 @@
           </button>
         </div>
         
-        <div id="room-list" class="max-h-48 sm:max-h-72 overflow-y-auto rounded-lg mb-4">
+        <div id="room-list" class="max-h-64 sm:max-h-96 overflow-y-auto rounded-lg mb-4">
           <div class="p-2 bg-gray-700 rounded text-sm sm:text-base">Loading rooms...</div>
         </div>
         
@@ -160,7 +198,7 @@
       </div>
       
       <!-- Right Panel: Timers -->
-      <div class="flex-1 card bg-gray-800 shadow p-3 sm:p-6 w-full">
+      <div class="flex-1 card bg-gray-800 shadow p-3 sm:p-6 w-full" id="timer-panel">
         <div id="current-room-info" class="mb-3 sm:mb-6">
           <h2 class="text-lg sm:text-xl font-semibold mb-2">
             <i class="fas fa-home sm:mr-1"></i> Current Room: <span id="current-room-name" class="font-normal">None</span>
@@ -194,8 +232,15 @@
           </div>
         </div>
         
-        <h3 class="text-base sm:text-lg font-semibold mb-2">Active Timers</h3>
-        <div id="timer-list" class="max-h-48 sm:max-h-72 overflow-y-auto rounded-lg">
+        <div class="flex justify-between items-center mb-2">
+          <h3 class="text-base sm:text-lg font-semibold">Active Timers</h3>
+          <button id="fullscreen-btn" class="btn btn-sm btn-outline btn-primary">
+            <i class="fas fa-expand sm:mr-1"></i>
+            <span class="hidden sm:inline">Fullscreen</span>
+          </button>
+        </div>
+        
+        <div id="timer-list" class="max-h-64 sm:max-h-96 overflow-y-auto rounded-lg">
           <div class="p-2 bg-gray-700 rounded text-sm sm:text-base">Join a room to see timers</div>
         </div>
       </div>
@@ -214,6 +259,19 @@
     </div>
   </div>
   
+  <!-- Fullscreen container -->
+  <div id="fullscreen-container" class="hidden">
+    <div class="timer-controls">
+      <button id="exit-fullscreen-btn" class="btn btn-circle btn-outline">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <h2 class="text-2xl font-bold mb-4">
+      <i class="fas fa-clock mr-2"></i> <span id="fullscreen-room-name"></span>
+    </h2>
+    <div id="fullscreen-timer-list" class="overflow-y-auto flex-grow"></div>
+  </div>
+  
   <script>
     document.addEventListener('DOMContentLoaded', function() {
       console.log('DOM fully loaded - starting application');
@@ -228,6 +286,7 @@
       let availableRooms = [];
       let roomTimers = [];
       let timerIntervals = {};
+      let isFullscreen = false;
       
       // DOM elements
       const connectBtn = document.getElementById('connect-btn');
@@ -266,33 +325,89 @@
       const createTimerBtn = document.getElementById('create-timer-btn');
       
       const timerList = document.getElementById('timer-list');
+      const timerPanel = document.getElementById('timer-panel');
+      const appContainer = document.getElementById('app-container');
+      
+      // Fullscreen elements
+      const fullscreenBtn = document.getElementById('fullscreen-btn');
+      const fullscreenContainer = document.getElementById('fullscreen-container');
+      const exitFullscreenBtn = document.getElementById('exit-fullscreen-btn');
+      const fullscreenTimerList = document.getElementById('fullscreen-timer-list');
+      const fullscreenRoomName = document.getElementById('fullscreen-room-name');
+      
+      // Fullscreen mode functions
+      function enterFullscreenMode() {
+        isFullscreen = true;
+        appContainer.classList.add('hidden');
+        fullscreenContainer.classList.remove('hidden');
+        fullscreenContainer.classList.add('fullscreen-mode');
+        fullscreenRoomName.textContent = currentRoomName.textContent;
+        
+        // Clone the timer list to the fullscreen container with larger size
+        fullscreenTimerList.innerHTML = '';
+        roomTimers.forEach(timer => {
+          const timerItem = createTimerElement(timer, true);
+          fullscreenTimerList.appendChild(timerItem);
+        });
+        
+        // Start any running timers in fullscreen mode
+        roomTimers.forEach(timer => {
+          if (timer.status === 'running') {
+            startTimerInterval(timer, true);
+          }
+        });
+      }
+      
+      function exitFullscreenMode() {
+        isFullscreen = false;
+        appContainer.classList.remove('hidden');
+        fullscreenContainer.classList.add('hidden');
+        fullscreenContainer.classList.remove('fullscreen-mode');
+        
+        // Clear all intervals in fullscreen and restart them in normal mode
+        Object.keys(timerIntervals).forEach(timerId => {
+          clearInterval(timerIntervals[timerId]);
+          delete timerIntervals[timerId];
+        });
+        
+        // Restart any running timers in normal mode
+        roomTimers.forEach(timer => {
+          if (timer.status === 'running') {
+            startTimerInterval(timer);
+          }
+        });
+        
+        renderTimerList();
+      }
+      
+      fullscreenBtn.addEventListener('click', enterFullscreenMode);
+      exitFullscreenBtn.addEventListener('click', exitFullscreenMode);
       
       // Helper functions
-// Locate this function in the code
-function logMessage(message, data = null) {
-  const now = new Date().toLocaleTimeString();
-  const logEntry = document.createElement('div');
-  logEntry.className = 'font-mono text-xs sm:text-sm';
-  
-  // Change this part to preserve formatting
-  if (data) {
-    // Create a container with timestamp and message
-    const messageSpan = document.createElement('span');
-    messageSpan.textContent = `[${now}] ${message}: `;
-    logEntry.appendChild(messageSpan);
-    
-    // Create a pre element for the formatted JSON
-    const jsonPre = document.createElement('pre');
-    jsonPre.className = 'mt-1 whitespace-pre-wrap break-all';
-    jsonPre.textContent = JSON.stringify(data, null, 2);
-    logEntry.appendChild(jsonPre);
-  } else {
-    logEntry.textContent = `[${now}] ${message}`;
-  }
-  
-  logContainer.appendChild(logEntry);
-  logContainer.scrollTop = logContainer.scrollHeight;
-}
+      function logMessage(message, data = null) {
+        const now = new Date().toLocaleTimeString();
+        const logEntry = document.createElement('div');
+        logEntry.className = 'font-mono text-xs sm:text-sm';
+        
+        // Change this part to preserve formatting
+        if (data) {
+          // Create a container with timestamp and message
+          const messageSpan = document.createElement('span');
+          messageSpan.textContent = `[${now}] ${message}: `;
+          logEntry.appendChild(messageSpan);
+          
+          // Create a pre element for the formatted JSON
+          const jsonPre = document.createElement('pre');
+          jsonPre.className = 'mt-1 whitespace-pre-wrap break-all';
+          jsonPre.textContent = JSON.stringify(data, null, 2);
+          logEntry.appendChild(jsonPre);
+        } else {
+          logEntry.textContent = `[${now}] ${message}`;
+        }
+        
+        logContainer.appendChild(logEntry);
+        logContainer.scrollTop = logContainer.scrollHeight;
+      }
       
       function updateConnectionStatus(status) {
         connectionStatus.textContent = status;
@@ -426,10 +541,12 @@ function logMessage(message, data = null) {
         });
       }
       
-      // IMPROVED: Fixed startTimerInterval function to handle resuming from pause correctly and make animation smoother
-      function startTimerInterval(timer) {
-        if (timerIntervals[timer.id]) {
-          clearInterval(timerIntervals[timer.id]);
+      // IMPROVED: Fixed startTimerInterval function to handle fullscreen mode
+      function startTimerInterval(timer, isFullscreenTimer = false) {
+        const timerId = isFullscreenTimer ? `fs-${timer.id}` : timer.id;
+        
+        if (timerIntervals[timerId]) {
+          clearInterval(timerIntervals[timerId]);
         }
         if (timer.status !== 'running') return;
         
@@ -439,7 +556,7 @@ function logMessage(message, data = null) {
         const remainingMs = remaining * 1000; // convert to ms
         
         // Update more frequently for smoother animation (every 16ms ≈ 60fps)
-        timerIntervals[timer.id] = setInterval(() => {
+        timerIntervals[timerId] = setInterval(() => {
           const elapsedMs = Date.now() - startTime;
           const remainingTimeMs = Math.max(0, remainingMs - elapsedMs);
           const newRemaining = Math.ceil(remainingTimeMs / 1000); // Round up to nearest second for display
@@ -452,17 +569,17 @@ function logMessage(message, data = null) {
             ...timer, 
             remaining: newRemaining,
             preciseRemaining: preciseRemaining // Add precise value for smoother progress
-          });
+          }, isFullscreenTimer);
           
           if (remainingTimeMs <= 0) {
-            clearInterval(timerIntervals[timer.id]);
-            delete timerIntervals[timer.id];
+            clearInterval(timerIntervals[timerId]);
+            delete timerIntervals[timerId];
             // Mark as completed and update UI
             updateTimerDisplay({ 
               ...timer, 
               remaining: 0,
               status: 'completed'
-            });
+            }, isFullscreenTimer);
             // Send completed notification to server
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({ 
@@ -474,9 +591,164 @@ function logMessage(message, data = null) {
         }, 16); // ~60fps for smooth animation
       }
       
-      // IMPROVED: renderTimerList function to maintain individual timer state
+      // Create a timer element function that can be used by both normal and fullscreen modes
+      function createTimerElement(timer, isFullscreen = false) {
+        // If timer is completed or created, change its status to "ready"
+        // This ensures timers show as "ready" instead of "completed"
+        if (timer.status === 'completed' || timer.status === 'created') {
+          timer.status = 'ready';
+          timer.remaining = timer.duration; // Reset remaining time to full
+        }
+        
+        const timerItem = document.createElement('div');
+        
+        // Make fullscreen timers larger
+        if (isFullscreen) {
+          timerItem.className = 'p-4 sm:p-6 bg-gray-700 rounded mb-4 text-base sm:text-lg';
+          // Add animation for running timers
+          if (timer.status === 'running') {
+            timerItem.classList.add('timer-pulse');
+          }
+        } else {
+          timerItem.className = 'p-2 sm:p-4 bg-gray-700 rounded mb-2 text-sm sm:text-base';
+        }
+        
+        timerItem.setAttribute('data-timer-id', timer.id);
+        
+        // Header with timer name and status badge
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'flex items-center justify-between mb-1';
+        headerDiv.innerHTML = `<strong class="truncate mr-1">${timer.name}</strong> <span class="timer-status">${getStatusBadge(timer.status)}</span>`;
+        
+        // Progress bar
+        const progressContainer = document.createElement('div');
+        
+        // Make fullscreen progress bar larger
+        if (isFullscreen) {
+          progressContainer.className = 'w-full bg-gray-600 rounded h-4 sm:h-6 my-2 sm:my-3';
+        } else {
+          progressContainer.className = 'w-full bg-gray-600 rounded h-2 sm:h-4 my-1 sm:my-2';
+        }
+        
+        const progressBar = document.createElement('div');
+        progressBar.className = 'bg-primary h-full rounded';
+        progressBar.style.transition = 'width 1s linear';
+        
+        // Set initial progress bar width based on status
+        let progressPercent;
+        if (timer.status === 'running') {
+          progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
+        } else if (timer.status === 'ready') {
+          progressPercent = 100; // Full bar for ready state
+        } else if (timer.status === 'paused') {
+          progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
+        } else {
+          progressPercent = 100; // Default to full bar
+        }
+        
+        progressBar.style.width = `${progressPercent}%`;
+        progressContainer.appendChild(progressBar);
+        
+        // Timer details
+        const detailsDiv = document.createElement('div');
+        
+        // Make fullscreen details larger
+        if (isFullscreen) {
+          detailsDiv.className = 'flex justify-between text-sm sm:text-base font-semibold';
+        } else {
+          detailsDiv.className = 'flex justify-between text-xs sm:text-sm';
+        }
+        
+        detailsDiv.innerHTML = `<div>Total: ${formatTime(timer.duration)}</div><div class="timer-remaining">${formatTime(timer.remaining)}</div>`;
+        
+        // Controls: toggle (start/pause) and reset
+        const controlsDiv = document.createElement('div');
+        
+        // Make fullscreen controls larger
+        if (isFullscreen) {
+          controlsDiv.className = 'flex gap-2 sm:gap-3 mt-3';
+        } else {
+          controlsDiv.className = 'flex gap-1 sm:gap-2 mt-2';
+        }
+
+        // Single toggle button for start/pause
+        const toggleBtn = document.createElement('button');
+        if (timer.status === 'running') {
+          toggleBtn.innerHTML = '<i class="fas fa-pause sm:mr-1"></i><span class="hidden sm:inline">Pause</span>';
+          toggleBtn.className = isFullscreen ? 
+            'btn btn-warning btn-sm sm:btn-md flex-1' : 
+            'btn btn-warning btn-xs sm:btn-sm flex-1';
+          toggleBtn.setAttribute('data-action', 'pause');
+        } else {
+          toggleBtn.innerHTML = '<i class="fas fa-play sm:mr-1"></i><span class="hidden sm:inline">Start</span>';
+          toggleBtn.className = isFullscreen ? 
+            'btn btn-success btn-sm sm:btn-md flex-1' : 
+            'btn btn-success btn-xs sm:btn-sm flex-1';
+          toggleBtn.setAttribute('data-action', 'start');
+        }
+        
+        toggleBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); // Prevent event bubbling
+          const action = toggleBtn.getAttribute('data-action');
+          if (action === 'pause') {
+            const message = { type: 'pause_timer', timerId: timer.id };
+            ws.send(JSON.stringify(message));
+            logMessage('Pausing timer', message);
+          } else {
+            const message = { type: 'start_timer', timerId: timer.id };
+            ws.send(JSON.stringify(message));
+            logMessage('Starting timer', message);
+          }
+        });
+
+        const resetBtn = document.createElement('button');
+        resetBtn.innerHTML = '<i class="fas fa-redo-alt sm:mr-1"></i><span class="hidden sm:inline">Reset</span>';
+        resetBtn.className = isFullscreen ? 
+          'btn btn-error btn-sm sm:btn-md flex-1' : 
+          'btn btn-error btn-xs sm:btn-sm flex-1';
+        resetBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); // Prevent event bubbling
+          const message = { type: 'stop_timer', timerId: timer.id };
+          ws.send(JSON.stringify(message));
+          logMessage('Resetting timer', message);
+        });
+
+        // Add a delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.innerHTML = '<i class="fas fa-trash-alt sm:mr-1"></i><span class="hidden sm:inline">Delete</span>';
+        deleteBtn.className = isFullscreen ? 
+          'btn btn-outline btn-error btn-sm sm:btn-md flex-1' : 
+          'btn btn-outline btn-error btn-xs sm:btn-sm flex-1';
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); // Prevent event bubbling
+          if (confirm('Are you sure you want to delete this timer?')) {
+            const message = { type: 'delete_timer', timerId: timer.id };
+            ws.send(JSON.stringify(message));
+            logMessage('Deleting timer', message);
+          }
+        });
+
+        controlsDiv.appendChild(toggleBtn);
+        controlsDiv.appendChild(resetBtn);
+        controlsDiv.appendChild(deleteBtn);
+        
+        timerItem.appendChild(headerDiv);
+        timerItem.appendChild(progressContainer);
+        timerItem.appendChild(detailsDiv);
+        timerItem.appendChild(controlsDiv);
+        
+        return timerItem;
+      }
+      
+      // IMPROVED: renderTimerList function to use createTimerElement
       function renderTimerList() {
         timerList.innerHTML = '';
+        
+        // Update fullscreen list if in fullscreen mode
+        if (isFullscreen) {
+          fullscreenTimerList.innerHTML = '';
+        }
+        
         if (!currentRoomId) {
           const emptyItem = document.createElement('div');
           emptyItem.className = 'p-2 bg-gray-700 rounded text-sm sm:text-base';
@@ -496,126 +768,36 @@ function logMessage(message, data = null) {
         const runningTimerIds = Object.keys(timerIntervals);
         
         roomTimers.forEach(timer => {
-          // If timer is completed or created, change its status to "ready"
-          // This ensures timers show as "ready" instead of "completed"
-          if (timer.status === 'completed' || timer.status === 'created') {
-            timer.status = 'ready';
-            timer.remaining = timer.duration; // Reset remaining time to full
-          }
-          
-          const timerItem = document.createElement('div');
-          timerItem.className = 'p-2 sm:p-4 bg-gray-700 rounded mb-2 text-sm sm:text-base';
-          timerItem.setAttribute('data-timer-id', timer.id);
-          
-          // Header with timer name and status badge
-          const headerDiv = document.createElement('div');
-          headerDiv.className = 'flex items-center justify-between mb-1';
-          headerDiv.innerHTML = `<strong class="truncate mr-1">${timer.name}</strong> <span class="timer-status">${getStatusBadge(timer.status)}</span>`;
-          
-          // Progress bar
-          const progressContainer = document.createElement('div');
-          progressContainer.className = 'w-full bg-gray-600 rounded h-2 sm:h-4 my-1 sm:my-2';
-          const progressBar = document.createElement('div');
-          progressBar.className = 'bg-primary h-2 sm:h-4 rounded';
-          progressBar.style.transition = 'width 1s linear';
-          
-          // Set initial progress bar width based on status
-          let progressPercent;
-          if (timer.status === 'running') {
-            progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
-          } else if (timer.status === 'ready') {
-            progressPercent = 100; // Full bar for ready state
-          } else if (timer.status === 'paused') {
-            progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
-          } else {
-            progressPercent = 100; // Default to full bar
-          }
-          
-          progressBar.style.width = `${progressPercent}%`;
-          progressContainer.appendChild(progressBar);
-          
-          // Timer details
-          const detailsDiv = document.createElement('div');
-          detailsDiv.className = 'flex justify-between text-xs sm:text-sm';
-          detailsDiv.innerHTML = `<div>Total: ${formatTime(timer.duration)}</div><div class="timer-remaining">${formatTime(timer.remaining)}</div>`;
-          
-          // Controls: toggle (start/pause) and reset
-          const controlsDiv = document.createElement('div');
-          controlsDiv.className = 'flex gap-1 sm:gap-2 mt-2';
-
-          // Single toggle button for start/pause
-          const toggleBtn = document.createElement('button');
-          if (timer.status === 'running') {
-            toggleBtn.innerHTML = '<i class="fas fa-pause sm:mr-1"></i><span class="hidden sm:inline">Pause</span>';
-            toggleBtn.className = 'btn btn-warning btn-xs sm:btn-sm flex-1';
-            toggleBtn.setAttribute('data-action', 'pause');
-          } else {
-            toggleBtn.innerHTML = '<i class="fas fa-play sm:mr-1"></i><span class="hidden sm:inline">Start</span>';
-            toggleBtn.className = 'btn btn-success btn-xs sm:btn-sm flex-1';
-            toggleBtn.setAttribute('data-action', 'start');
-          }
-          
-          toggleBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent event bubbling
-            const action = toggleBtn.getAttribute('data-action');
-            if (action === 'pause') {
-              const message = { type: 'pause_timer', timerId: timer.id };
-              ws.send(JSON.stringify(message));
-              logMessage('Pausing timer', message);
-            } else {
-              const message = { type: 'start_timer', timerId: timer.id };
-              ws.send(JSON.stringify(message));
-              logMessage('Starting timer', message);
-            }
-          });
-
-          const resetBtn = document.createElement('button');
-          resetBtn.innerHTML = '<i class="fas fa-redo-alt sm:mr-1"></i><span class="hidden sm:inline">Reset</span>';
-          resetBtn.className = 'btn btn-error btn-xs sm:btn-sm flex-1';
-          resetBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent event bubbling
-            const message = { type: 'stop_timer', timerId: timer.id };
-            ws.send(JSON.stringify(message));
-            logMessage('Resetting timer', message);
-          });
-
-          // Add a delete button
-          const deleteBtn = document.createElement('button');
-          deleteBtn.innerHTML = '<i class="fas fa-trash-alt sm:mr-1"></i><span class="hidden sm:inline">Delete</span>';
-          deleteBtn.className = 'btn btn-outline btn-error btn-xs sm:btn-sm flex-1';
-          deleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent event bubbling
-            if (confirm('Are you sure you want to delete this timer?')) {
-              const message = { type: 'delete_timer', timerId: timer.id };
-              ws.send(JSON.stringify(message));
-              logMessage('Deleting timer', message);
-            }
-          });
-
-          controlsDiv.appendChild(toggleBtn);
-          controlsDiv.appendChild(resetBtn);
-          controlsDiv.appendChild(deleteBtn);
-          
-          timerItem.appendChild(headerDiv);
-          timerItem.appendChild(progressContainer);
-          timerItem.appendChild(detailsDiv);
-          timerItem.appendChild(controlsDiv);
-          
+          // Create timer element for normal view
+          const timerItem = createTimerElement(timer);
           timerList.appendChild(timerItem);
+          
+          // Create timer element for fullscreen view if in fullscreen mode
+          if (isFullscreen) {
+            const fullscreenTimerItem = createTimerElement(timer, true);
+            fullscreenTimerList.appendChild(fullscreenTimerItem);
+          }
           
           // Start an interval if timer is running
           if (timer.status === 'running') {
             // Only start a new interval if it wasn't already running
             if (!runningTimerIds.includes(timer.id.toString())) {
               startTimerInterval(timer);
+              if (isFullscreen) {
+                startTimerInterval(timer, true);
+              }
             }
           }
         });
       }
       
-      // IMPROVED: updateTimerDisplay function to only update a specific timer
-      function updateTimerDisplay(timer) {
-        const timerElement = document.querySelector(`[data-timer-id="${timer.id}"]`);
+      // IMPROVED: updateTimerDisplay function to support fullscreen mode
+      function updateTimerDisplay(timer, isFullscreenTimer = false) {
+        const selector = isFullscreenTimer ? 
+          `#fullscreen-timer-list [data-timer-id="${timer.id}"]` : 
+          `#timer-list [data-timer-id="${timer.id}"]`;
+        
+        const timerElement = document.querySelector(selector);
         if (!timerElement) return;
         
         const progressBar = timerElement.querySelector('.bg-primary');
@@ -625,9 +807,10 @@ function logMessage(message, data = null) {
         // If timer is at 0 remaining, automatically set status to completed
         if (timer.remaining <= 0 && timer.status === 'running') {
           timer.status = 'completed';
-          if (timerIntervals[timer.id]) {
-            clearInterval(timerIntervals[timer.id]);
-            delete timerIntervals[timer.id];
+          const timerId = isFullscreenTimer ? `fs-${timer.id}` : timer.id;
+          if (timerIntervals[timerId]) {
+            clearInterval(timerIntervals[timerId]);
+            delete timerIntervals[timerId];
           }
         }
         
@@ -653,9 +836,20 @@ function logMessage(message, data = null) {
         // Add high-quality animation for running timers
         if (timer.status === 'running') {
           progressBar.style.transition = 'width 1s linear';
+          
+          // Add pulse animation in fullscreen mode for running timers
+          if (isFullscreenTimer && !timerElement.classList.contains('timer-pulse')) {
+            timerElement.classList.add('timer-pulse');
+          }
         } else {
           progressBar.style.transition = 'width 0.3s ease';
+          
+          // Remove pulse animation in fullscreen mode for non-running timers
+          if (isFullscreenTimer) {
+            timerElement.classList.remove('timer-pulse');
+          }
         }
+        
         remainingTimeElement.textContent = formatTime(timer.remaining);
         
         // Update status
@@ -672,11 +866,15 @@ function logMessage(message, data = null) {
           if (currentAction !== newAction) {
             if (timer.status === 'running') {
               toggleBtn.innerHTML = '<i class="fas fa-pause sm:mr-1"></i><span class="hidden sm:inline">Pause</span>';
-              toggleBtn.className = 'btn btn-warning btn-xs sm:btn-sm flex-1';
+              toggleBtn.className = isFullscreenTimer ? 
+                'btn btn-warning btn-sm sm:btn-md flex-1' : 
+                'btn btn-warning btn-xs sm:btn-sm flex-1';
               toggleBtn.setAttribute('data-action', 'pause');
             } else {
               toggleBtn.innerHTML = '<i class="fas fa-play sm:mr-1"></i><span class="hidden sm:inline">Start</span>';
-              toggleBtn.className = 'btn btn-success btn-xs sm:btn-sm flex-1';
+              toggleBtn.className = isFullscreenTimer ? 
+                'btn btn-success btn-sm sm:btn-md flex-1' : 
+                'btn btn-success btn-xs sm:btn-sm flex-1';
               toggleBtn.setAttribute('data-action', 'start');
             }
           }
@@ -691,6 +889,14 @@ function logMessage(message, data = null) {
         roomDetails.classList.remove('hidden');
         leaveRoomBtn.disabled = false;
         createTimerBtn.disabled = false;
+        
+        // Enable fullscreen button when we join a room
+        fullscreenBtn.disabled = false;
+        
+        // Update fullscreen room name if in fullscreen mode
+        if (isFullscreen) {
+          fullscreenRoomName.textContent = room.name;
+        }
         
         // Close the modal if it's open
         joinPrivateModal.classList.remove('modal-open');
@@ -720,6 +926,15 @@ function logMessage(message, data = null) {
         roomDetails.classList.add('hidden');
         leaveRoomBtn.disabled = true;
         createTimerBtn.disabled = true;
+        
+        // Disable fullscreen button when we leave a room
+        fullscreenBtn.disabled = true;
+        
+        // Exit fullscreen mode if active
+        if (isFullscreen) {
+          exitFullscreenMode();
+        }
+        
         selectedRoomId = null;
         roomTimers = [];
         renderTimerList();
@@ -761,6 +976,7 @@ function logMessage(message, data = null) {
             createRoomBtn.disabled = true;
             leaveRoomBtn.disabled = true;
             createTimerBtn.disabled = true;
+            fullscreenBtn.disabled = true;
             updateUIForRoomLeft();
             Object.keys(timerIntervals).forEach(timerId => {
               clearInterval(timerIntervals[timerId]);
@@ -813,8 +1029,14 @@ function logMessage(message, data = null) {
                   roomTimers = roomTimers.map(t => t.id === startedTimer.id ? startedTimer : t);
                   // Find the DOM element and update it directly
                   updateTimerDisplay(startedTimer);
+                  if (isFullscreen) {
+                    updateTimerDisplay(startedTimer, true);
+                  }
                   // Start the timer interval
                   startTimerInterval(startedTimer);
+                  if (isFullscreen) {
+                    startTimerInterval(startedTimer, true);
+                  }
                   break;
 
                 case 'timer_paused':
@@ -825,10 +1047,17 @@ function logMessage(message, data = null) {
                     clearInterval(timerIntervals[pausedTimer.id]);
                     delete timerIntervals[pausedTimer.id];
                   }
+                  if (timerIntervals[`fs-${pausedTimer.id}`]) {
+                    clearInterval(timerIntervals[`fs-${pausedTimer.id}`]);
+                    delete timerIntervals[`fs-${pausedTimer.id}`];
+                  }
                   // Update the timer in our list
                   roomTimers = roomTimers.map(t => t.id === pausedTimer.id ? pausedTimer : t);
                   // Find the DOM element and update it directly
                   updateTimerDisplay(pausedTimer);
+                  if (isFullscreen) {
+                    updateTimerDisplay(pausedTimer, true);
+                  }
                   break;
 
                 // ADDED: Handler for timer_stopped response from server
@@ -840,6 +1069,10 @@ function logMessage(message, data = null) {
                     clearInterval(timerIntervals[stoppedTimer.id]);
                     delete timerIntervals[stoppedTimer.id];
                   }
+                  if (timerIntervals[`fs-${stoppedTimer.id}`]) {
+                    clearInterval(timerIntervals[`fs-${stoppedTimer.id}`]);
+                    delete timerIntervals[`fs-${stoppedTimer.id}`];
+                  }
                   // Mark as ready instead of completed, with full remaining time
                   stoppedTimer.status = 'ready';
                   stoppedTimer.remaining = stoppedTimer.duration;
@@ -847,6 +1080,9 @@ function logMessage(message, data = null) {
                   roomTimers = roomTimers.map(t => t.id === stoppedTimer.id ? stoppedTimer : t);
                   // Find the DOM element and update it directly
                   updateTimerDisplay(stoppedTimer);
+                  if (isFullscreen) {
+                    updateTimerDisplay(stoppedTimer, true);
+                  }
                   break;
 
                 case 'timer_completed':
@@ -857,6 +1093,10 @@ function logMessage(message, data = null) {
                     clearInterval(timerIntervals[completedTimer.id]);
                     delete timerIntervals[completedTimer.id];
                   }
+                  if (timerIntervals[`fs-${completedTimer.id}`]) {
+                    clearInterval(timerIntervals[`fs-${completedTimer.id}`]);
+                    delete timerIntervals[`fs-${completedTimer.id}`];
+                  }
                   // Mark as ready instead of completed, with full remaining time
                   completedTimer.status = 'ready';
                   completedTimer.remaining = completedTimer.duration;
@@ -864,6 +1104,9 @@ function logMessage(message, data = null) {
                   roomTimers = roomTimers.map(t => t.id === completedTimer.id ? completedTimer : t);
                   // Find the DOM element and update it directly
                   updateTimerDisplay(completedTimer);
+                  if (isFullscreen) {
+                    updateTimerDisplay(completedTimer, true);
+                  }
                   break;
                   
                 case 'timer_deleted':
@@ -874,6 +1117,10 @@ function logMessage(message, data = null) {
                     if (timerIntervals[message.timerId]) {
                       clearInterval(timerIntervals[message.timerId]);
                       delete timerIntervals[message.timerId];
+                    }
+                    if (timerIntervals[`fs-${message.timerId}`]) {
+                      clearInterval(timerIntervals[`fs-${message.timerId}`]);
+                      delete timerIntervals[`fs-${message.timerId}`];
                     }
                     // Filter out the deleted timer
                     roomTimers = roomTimers.filter(t => t.id !== message.timerId);
@@ -1070,6 +1317,9 @@ function logMessage(message, data = null) {
         ws.send(JSON.stringify(message));
         logMessage('Creating timer', message);
       });
+      
+      // Initial setup
+      fullscreenBtn.disabled = true; // Disable fullscreen button until in a room
       
       if (serverUrlInput.value) {
         connectBtn.click();
