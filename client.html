@@ -71,16 +71,7 @@
       margin-bottom: 1rem;
     }
     
-    /* Timer animations for fullscreen */
-    .timer-pulse {
-      animation: pulse 1.5s infinite;
-    }
-    
-    @keyframes pulse {
-      0% { transform: scale(1); }
-      50% { transform: scale(1.05); }
-      100% { transform: scale(1); }
-    }
+    /* Fullscreen mode styling - removed pulsing effect */
   </style>
 </head>
 <body class="bg-gray-900 text-gray-100 p-2 sm:p-4 md:p-8 w-full">
@@ -351,9 +342,16 @@
         });
         
         // Start any running timers in fullscreen mode
-        roomTimers.forEach(timer => {
-          if (timer.status === 'running') {
-            startTimerInterval(timer, true);
+        // But first save the current intervals to preserve timing
+        const runningTimerIds = {};
+        Object.keys(timerIntervals).forEach(timerId => {
+          if (!timerId.startsWith('fs-')) {
+            // For each normal timer interval, find the timer and save its current state
+            const timer = roomTimers.find(t => t.id === timerId);
+            if (timer && timer.status === 'running') {
+              // Use the existing timer with its current remaining time
+              startTimerInterval(timer, true);
+            }
           }
         });
       }
@@ -364,19 +362,15 @@
         fullscreenContainer.classList.add('hidden');
         fullscreenContainer.classList.remove('fullscreen-mode');
         
-        // Clear all intervals in fullscreen and restart them in normal mode
+        // Only clear fullscreen intervals, preserve the normal ones
         Object.keys(timerIntervals).forEach(timerId => {
-          clearInterval(timerIntervals[timerId]);
-          delete timerIntervals[timerId];
-        });
-        
-        // Restart any running timers in normal mode
-        roomTimers.forEach(timer => {
-          if (timer.status === 'running') {
-            startTimerInterval(timer);
+          if (timerId.startsWith('fs-')) {
+            clearInterval(timerIntervals[timerId]);
+            delete timerIntervals[timerId];
           }
         });
         
+        // No need to restart timers, just refresh the display
         renderTimerList();
       }
       
@@ -550,9 +544,13 @@
         }
         if (timer.status !== 'running') return;
         
-        const remaining = timer.remaining; // seconds
+        // Find the timer in our roomTimers array to get the most up-to-date state
+        const currentTimer = roomTimers.find(t => t.id === timer.id) || timer;
+        
+        // Use the most up-to-date remaining time
+        const remaining = currentTimer.remaining; // seconds
         const startTime = Date.now();
-        const totalDuration = timer.duration * 1000; // convert to ms
+        const totalDuration = currentTimer.duration * 1000; // convert to ms
         const remainingMs = remaining * 1000; // convert to ms
         
         // Update more frequently for smoother animation (every 16ms ≈ 60fps)
@@ -564,27 +562,69 @@
           // For progress bar, use precise ms values for smooth animation
           const preciseRemaining = remainingTimeMs / 1000; // seconds with decimal precision
           
+          // Update the timer in our roomTimers array to keep state synchronized
+          const timerIdx = roomTimers.findIndex(t => t.id === currentTimer.id);
+          if (timerIdx >= 0) {
+            roomTimers[timerIdx].remaining = newRemaining;
+            roomTimers[timerIdx].preciseRemaining = preciseRemaining;
+          }
+          
           // Update only this timer's display without re-rendering the whole list
           updateTimerDisplay({ 
-            ...timer, 
+            ...currentTimer, 
             remaining: newRemaining,
             preciseRemaining: preciseRemaining // Add precise value for smoother progress
           }, isFullscreenTimer);
           
+          // Also update the other view if it exists
+          if (isFullscreenTimer) {
+            // Also update normal view
+            updateTimerDisplay({ 
+              ...currentTimer, 
+              remaining: newRemaining,
+              preciseRemaining: preciseRemaining
+            }, false);
+          } else if (isFullscreen) {
+            // Also update fullscreen view
+            updateTimerDisplay({ 
+              ...currentTimer, 
+              remaining: newRemaining,
+              preciseRemaining: preciseRemaining
+            }, true);
+          }
+          
           if (remainingTimeMs <= 0) {
             clearInterval(timerIntervals[timerId]);
             delete timerIntervals[timerId];
+            
             // Mark as completed and update UI
-            updateTimerDisplay({ 
-              ...timer, 
+            const completedTimer = {
+              ...currentTimer,
               remaining: 0,
               status: 'completed'
-            }, isFullscreenTimer);
+            };
+            
+            // Update the timer in our roomTimers array
+            const idx = roomTimers.findIndex(t => t.id === currentTimer.id);
+            if (idx >= 0) {
+              roomTimers[idx].remaining = 0;
+              roomTimers[idx].status = 'completed';
+            }
+            
+            updateTimerDisplay(completedTimer, isFullscreenTimer);
+            
+            // Also update the other view
+            if (isFullscreenTimer && !isFullscreen) {
+              updateTimerDisplay(completedTimer, false);
+            } else if (!isFullscreenTimer && isFullscreen) {
+              updateTimerDisplay(completedTimer, true);
+            }
+            
             // Send completed notification to server
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({ 
                 type: 'timer_completed', 
-                timerId: timer.id 
+                timerId: currentTimer.id 
               }));
             }
           }
@@ -605,10 +645,6 @@
         // Make fullscreen timers larger
         if (isFullscreen) {
           timerItem.className = 'p-4 sm:p-6 bg-gray-700 rounded mb-4 text-base sm:text-lg';
-          // Add animation for running timers
-          if (timer.status === 'running') {
-            timerItem.classList.add('timer-pulse');
-          }
         } else {
           timerItem.className = 'p-2 sm:p-4 bg-gray-700 rounded mb-2 text-sm sm:text-base';
         }
@@ -837,17 +873,8 @@
         if (timer.status === 'running') {
           progressBar.style.transition = 'width 1s linear';
           
-          // Add pulse animation in fullscreen mode for running timers
-          if (isFullscreenTimer && !timerElement.classList.contains('timer-pulse')) {
-            timerElement.classList.add('timer-pulse');
-          }
-        } else {
+          } else {
           progressBar.style.transition = 'width 0.3s ease';
-          
-          // Remove pulse animation in fullscreen mode for non-running timers
-          if (isFullscreenTimer) {
-            timerElement.classList.remove('timer-pulse');
-          }
         }
         
         remainingTimeElement.textContent = formatTime(timer.remaining);
