@@ -268,6 +268,7 @@
       const timerList = document.getElementById('timer-list');
       
       // Helper functions
+// Locate this function in the code
 function logMessage(message, data = null) {
   const now = new Date().toLocaleTimeString();
   const logEntry = document.createElement('div');
@@ -282,8 +283,7 @@ function logMessage(message, data = null) {
     
     // Create a pre element for the formatted JSON
     const jsonPre = document.createElement('pre');
-    jsonPre.className = 'mt-1 overflow-x-auto';
-    jsonPre.style.maxHeight = '200px'; // Limit height for very large objects
+    jsonPre.className = 'mt-1 whitespace-pre-wrap break-all';
     jsonPre.textContent = JSON.stringify(data, null, 2);
     logEntry.appendChild(jsonPre);
   } else {
