@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="night">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13,14 +14,20 @@
   <style>
     /* Custom styles for dark theme selections and disabled buttons */
     .selected-room {
-      background-color: #374151 !important; /* Tailwind gray-700 */
-      border-left: 4px solid #1e293b !important; /* Tailwind blue-gray-800 */
+      background-color: #374151 !important;
+      /* Tailwind gray-700 */
+      border-left: 4px solid #1e293b !important;
+      /* Tailwind blue-gray-800 */
     }
+
     .current-room {
-      background-color: #1f2937 !important; /* Darker background */
-      border-left: 4px solid #3b82f6 !important; /* Blue border */
+      background-color: #1f2937 !important;
+      /* Darker background */
+      border-left: 4px solid #3b82f6 !important;
+      /* Blue border */
       position: relative;
     }
+
     .current-room::after {
       content: "👉";
       position: absolute;
@@ -28,14 +35,20 @@
       top: 50%;
       transform: translateY(-50%);
     }
+
     button:disabled {
       opacity: 0.6;
       cursor: not-allowed;
     }
+
     /* Fix iOS zoom */
-    input[type="text"], input[type="password"], input[type="number"] {
-      font-size: 16px !important; /* Prevent iOS zoom on focus */
+    input[type="text"],
+    input[type="password"],
+    input[type="number"] {
+      font-size: 16px !important;
+      /* Prevent iOS zoom on focus */
     }
+
     /* Mobile overflow fixes */
     @media (max-width: 640px) {
       .mobile-container {
@@ -43,7 +56,7 @@
         padding: 0.5rem;
       }
     }
-    
+
     /* Fullscreen mode styles */
     .fullscreen-mode {
       position: fixed;
@@ -58,34 +71,37 @@
       display: flex;
       flex-direction: column;
     }
-    
+
     .fullscreen-mode #timer-list {
       flex-grow: 1;
       max-height: none !important;
       overflow-y: auto;
     }
-    
+
     .fullscreen-mode .timer-controls {
       display: flex;
       justify-content: flex-end;
       margin-bottom: 1rem;
     }
-    
+
     /* Fullscreen mode styling - removed pulsing effect */
   </style>
 </head>
+
 <body class="bg-gray-900 text-gray-100 p-2 sm:p-4 md:p-8 w-full">
   <div class="max-w-5xl mx-auto" id="app-container">
     <h1 class="text-2xl sm:text-3xl font-bold text-gray-100 mb-4 text-center sm:text-left">Timer App</h1>
-    
+
     <div id="connection-status" class="alert alert-error mb-4 text-center text-sm sm:text-base">
       Disconnected
     </div>
-    
+
     <div class="mb-4">
       <label for="server-url" class="label text-sm sm:text-base">WebSocket Server URL</label>
       <div class="flex flex-wrap gap-2">
-        <input type="text" id="server-url" value="wss://simple-timers-wss.onrender.com" placeholder="ws://localhost:8080" class="input input-bordered flex-1 bg-gray-800 border-gray-700 text-gray-100 text-sm sm:text-base mobile-input">
+        <input type="text" id="server-url" value="wss://simple-timers-wss.onrender.com"
+          placeholder="ws://localhost:8080"
+          class="input input-bordered flex-1 bg-gray-800 border-gray-700 text-gray-100 text-sm sm:text-base mobile-input">
         <div class="flex gap-1">
           <button id="connect-btn" class="btn btn-primary btn-sm sm:btn-md">
             <i class="fas fa-plug sm:mr-1"></i>
@@ -98,39 +114,41 @@
         </div>
       </div>
     </div>
-    
+
     <!-- Responsive container: stacks on mobile, side-by-side on md+ -->
     <div class="flex flex-col md:flex-row gap-4">
       <!-- Left Panel: Rooms -->
       <div class="flex-1 card bg-gray-800 shadow p-3 sm:p-6 w-full">
         <h2 class="card-title text-lg sm:text-xl mb-2 sm:mb-4">Rooms</h2>
-        
+
         <div class="collapse collapse-arrow mb-4">
-          <input type="checkbox" class="peer"> 
+          <input type="checkbox" class="peer">
           <div class="collapse-title bg-gray-700 rounded-t-lg text-base sm:text-lg font-semibold">
             Create Room
           </div>
-          <div class="collapse-content bg-gray-700 rounded-b-lg pt-2"> 
+          <div class="collapse-content bg-gray-700 rounded-b-lg pt-2">
             <div id="create-room-form" class="p-2">
               <div class="mb-2 sm:mb-4">
                 <label for="room-name" class="label text-sm sm:text-base p-1">Room Name</label>
-                <input type="text" id="room-name" placeholder="My Room" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
+                <input type="text" id="room-name" placeholder="My Room"
+                  class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
               </div>
               <div class="mb-2 sm:mb-4">
                 <label for="room-password" class="label text-sm sm:text-base p-1">Password (optional)</label>
-                <input type="password" id="room-password" placeholder="Leave empty for no password" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base mobile-input">
+                <input type="password" id="room-password" placeholder="Leave empty for no password"
+                  class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base mobile-input">
               </div>
               <div class="form-control mb-2 sm:mb-4">
                 <label class="cursor-pointer label justify-start gap-2">
                   <input type="checkbox" id="room-public" class="checkbox checkbox-sm sm:checkbox-md" checked>
-                  <span class="label-text text-sm sm:text-base">Public Room</span> 
+                  <span class="label-text text-sm sm:text-base">Public Room</span>
                 </label>
               </div>
               <button id="create-room-btn" class="btn btn-primary btn-sm sm:btn-md w-full" disabled>Create Room</button>
             </div>
           </div>
         </div>
-        
+
         <div class="flex justify-between items-center mb-3">
           <h3 class="text-base sm:text-lg font-semibold">Available Rooms</h3>
           <button id="join-private-btn" class="btn btn-primary btn-sm sm:btn-md">
@@ -138,18 +156,18 @@
             <span class="hidden sm:inline">Join Private Room</span>
           </button>
         </div>
-        
+
         <div class="mb-3" id="in-room-actions">
           <button id="leave-room-btn" class="btn btn-outline btn-error btn-sm sm:btn-md w-full" disabled>
             <i class="fas fa-sign-out-alt sm:mr-1"></i>
             <span class="inline">Leave Current Room</span>
           </button>
         </div>
-        
+
         <div id="room-list" class="max-h-64 sm:max-h-96 overflow-y-auto rounded-lg mb-4">
           <div class="p-2 bg-gray-700 rounded text-sm sm:text-base">Loading rooms...</div>
         </div>
-        
+
         <!-- Modal for joining private rooms -->
         <div id="join-private-modal" class="modal">
           <div class="modal-box bg-gray-800">
@@ -159,25 +177,28 @@
                 <a class="tab tab-active" id="invite-tab">Via Invite</a>
                 <a class="tab" id="password-tab">Via Password</a>
               </div>
-              
+
               <div id="invite-panel">
                 <div class="mb-4">
                   <label for="join-invite-token" class="label text-sm sm:text-base p-1">Invite Token</label>
-                  <input type="text" id="join-invite-token" placeholder="Enter invite token" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
+                  <input type="text" id="join-invite-token" placeholder="Enter invite token"
+                    class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
                 </div>
               </div>
-              
+
               <div id="password-panel" class="hidden">
                 <div class="mb-4">
                   <label for="join-room-id" class="label text-sm sm:text-base p-1">Room ID</label>
-                  <input type="text" id="join-room-id" placeholder="Enter room ID" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
+                  <input type="text" id="join-room-id" placeholder="Enter room ID"
+                    class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
                 </div>
                 <div class="mb-4">
                   <label for="join-room-password" class="label text-sm sm:text-base p-1">Password</label>
-                  <input type="password" id="join-room-password" placeholder="Enter room password" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
+                  <input type="password" id="join-room-password" placeholder="Enter room password"
+                    class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base">
                 </div>
               </div>
-              
+
               <div class="modal-action">
                 <button id="join-private-room-btn" class="btn btn-primary">Join Room</button>
                 <button id="cancel-join-btn" class="btn">Cancel</button>
@@ -187,21 +208,22 @@
           <div class="modal-backdrop" id="modal-backdrop"></div>
         </div>
       </div>
-      
+
       <!-- Right Panel: Timers -->
       <div class="flex-1 card bg-gray-800 shadow p-3 sm:p-6 w-full" id="timer-panel">
         <div id="current-room-info" class="mb-3 sm:mb-6">
           <h2 class="text-lg sm:text-xl font-semibold mb-2">
-            <i class="fas fa-home sm:mr-1"></i> Current Room: <span id="current-room-name" class="font-normal">None</span>
+            <i class="fas fa-home sm:mr-1"></i> Current Room: <span id="current-room-name"
+              class="font-normal">None</span>
           </h2>
           <div id="room-details" class="bg-gray-700 p-2 sm:p-4 rounded text-sm sm:text-base hidden">
             <div class="mb-1"><strong>Room ID:</strong> <span id="current-room-id" class="break-all"></span></div>
             <div><strong>Invite Token:</strong> <span id="current-room-token" class="break-all"></span></div>
           </div>
         </div>
-        
+
         <div class="collapse collapse-arrow mb-4">
-          <input type="checkbox" class="peer"> 
+          <input type="checkbox" class="peer">
           <div class="collapse-title bg-gray-700 rounded-t-lg text-base sm:text-lg font-semibold">
             Create Timer
           </div>
@@ -209,11 +231,13 @@
             <div id="create-timer-form" class="p-2">
               <div class="mb-2 sm:mb-4">
                 <label for="timer-name" class="label text-sm sm:text-base p-1">Timer Name</label>
-                <input type="text" id="timer-name" placeholder="My Timer" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base mobile-input">
+                <input type="text" id="timer-name" placeholder="My Timer"
+                  class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base mobile-input">
               </div>
               <div class="mb-2 sm:mb-4">
                 <label for="timer-duration" class="label text-sm sm:text-base p-1">Duration (seconds)</label>
-                <input type="number" id="timer-duration" value="60" min="1" class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base mobile-input">
+                <input type="number" id="timer-duration" value="60" min="1"
+                  class="input input-bordered w-full bg-gray-600 border-gray-600 text-gray-100 h-8 sm:h-10 text-sm sm:text-base mobile-input">
               </div>
               <button id="create-timer-btn" class="btn btn-primary btn-sm sm:btn-md w-full" disabled>
                 <i class="fas fa-plus-circle sm:mr-1"></i>
@@ -222,7 +246,7 @@
             </div>
           </div>
         </div>
-        
+
         <div class="flex justify-between items-center mb-2">
           <h3 class="text-base sm:text-lg font-semibold">Active Timers</h3>
           <button id="fullscreen-btn" class="btn btn-sm btn-outline btn-primary">
@@ -230,26 +254,27 @@
             <span class="hidden sm:inline">Fullscreen</span>
           </button>
         </div>
-        
+
         <div id="timer-list" class="max-h-64 sm:max-h-96 overflow-y-auto rounded-lg">
           <div class="p-2 bg-gray-700 rounded text-sm sm:text-base">Join a room to see timers</div>
         </div>
       </div>
     </div>
-    
+
     <div class="collapse collapse-arrow mt-4">
-      <input type="checkbox" class="peer"> 
+      <input type="checkbox" class="peer">
       <div class="collapse-title bg-gray-800 rounded-t-lg text-base sm:text-lg font-semibold">
         Connection Log
       </div>
       <div class="collapse-content bg-gray-800 rounded-b-lg pt-2">
-        <div id="log-container" class="bg-gray-700 border border-gray-700 rounded p-2 sm:p-4 max-h-32 sm:max-h-40 overflow-y-auto">
+        <div id="log-container"
+          class="bg-gray-700 border border-gray-700 rounded p-2 sm:p-4 max-h-32 sm:max-h-40 overflow-y-auto">
           <div class="font-mono text-xs sm:text-sm">Waiting for connection...</div>
         </div>
       </div>
     </div>
   </div>
-  
+
   <!-- Fullscreen container -->
   <div id="fullscreen-container" class="hidden">
     <div class="timer-controls">
@@ -262,13 +287,13 @@
     </h2>
     <div id="fullscreen-timer-list" class="overflow-y-auto flex-grow"></div>
   </div>
-  
+
   <script>
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', function () {
       console.log('DOM fully loaded - starting application');
       initializeApp();
     });
-    
+
     function initializeApp() {
       // Global variables
       let ws = null;
@@ -278,19 +303,19 @@
       let roomTimers = [];
       let timerIntervals = {};
       let isFullscreen = false;
-      
+
       // DOM elements
       const connectBtn = document.getElementById('connect-btn');
       const disconnectBtn = document.getElementById('disconnect-btn');
       const serverUrlInput = document.getElementById('server-url');
       const connectionStatus = document.getElementById('connection-status');
       const logContainer = document.getElementById('log-container');
-      
+
       const roomNameInput = document.getElementById('room-name');
       const roomPasswordInput = document.getElementById('room-password');
       const roomPublicCheckbox = document.getElementById('room-public');
       const createRoomBtn = document.getElementById('create-room-btn');
-      
+
       const joinPrivateBtn = document.getElementById('join-private-btn');
       const joinPrivateModal = document.getElementById('join-private-modal');
       const joinRoomIdInput = document.getElementById('join-room-id');
@@ -304,28 +329,28 @@
       const invitePanel = document.getElementById('invite-panel');
       const passwordPanel = document.getElementById('password-panel');
       const leaveRoomBtn = document.getElementById('leave-room-btn');
-      
+
       const roomList = document.getElementById('room-list');
       const currentRoomName = document.getElementById('current-room-name');
       const currentRoomIdElement = document.getElementById('current-room-id');
       const currentRoomToken = document.getElementById('current-room-token');
       const roomDetails = document.getElementById('room-details');
-      
+
       const timerNameInput = document.getElementById('timer-name');
       const timerDurationInput = document.getElementById('timer-duration');
       const createTimerBtn = document.getElementById('create-timer-btn');
-      
+
       const timerList = document.getElementById('timer-list');
       const timerPanel = document.getElementById('timer-panel');
       const appContainer = document.getElementById('app-container');
-      
+
       // Fullscreen elements
       const fullscreenBtn = document.getElementById('fullscreen-btn');
       const fullscreenContainer = document.getElementById('fullscreen-container');
       const exitFullscreenBtn = document.getElementById('exit-fullscreen-btn');
       const fullscreenTimerList = document.getElementById('fullscreen-timer-list');
       const fullscreenRoomName = document.getElementById('fullscreen-room-name');
-      
+
       // Fullscreen mode functions
       function enterFullscreenMode() {
         isFullscreen = true;
@@ -333,45 +358,45 @@
         fullscreenContainer.classList.remove('hidden');
         fullscreenContainer.classList.add('fullscreen-mode');
         fullscreenRoomName.textContent = currentRoomName.textContent;
-        
+
         // Clone the timer list to the fullscreen container with larger size
         fullscreenTimerList.innerHTML = '';
         roomTimers.forEach(timer => {
           const timerItem = createTimerElement(timer, true);
           fullscreenTimerList.appendChild(timerItem);
         });
-        
+
         // No need to start new intervals for fullscreen mode
         // The existing intervals will update both views
       }
-      
+
       function exitFullscreenMode() {
         isFullscreen = false;
         appContainer.classList.remove('hidden');
         fullscreenContainer.classList.add('hidden');
         fullscreenContainer.classList.remove('fullscreen-mode');
-        
+
         // No need to clear or restart intervals since we use a single source
         // Just refresh the display
         renderTimerList();
       }
-      
+
       fullscreenBtn.addEventListener('click', enterFullscreenMode);
       exitFullscreenBtn.addEventListener('click', exitFullscreenMode);
-      
+
       // Helper functions
       function logMessage(message, data = null) {
         const now = new Date().toLocaleTimeString();
         const logEntry = document.createElement('div');
         logEntry.className = 'font-mono text-xs sm:text-sm';
-        
+
         // Change this part to preserve formatting
         if (data) {
           // Create a container with timestamp and message
           const messageSpan = document.createElement('span');
           messageSpan.textContent = `[${now}] ${message}: `;
           logEntry.appendChild(messageSpan);
-          
+
           // Create a pre element for the formatted JSON
           const jsonPre = document.createElement('pre');
           jsonPre.className = 'mt-1 whitespace-pre-wrap break-all';
@@ -380,11 +405,11 @@
         } else {
           logEntry.textContent = `[${now}] ${message}`;
         }
-        
+
         logContainer.appendChild(logEntry);
         logContainer.scrollTop = logContainer.scrollHeight;
       }
-      
+
       function updateConnectionStatus(status) {
         connectionStatus.textContent = status;
         if (status.toLowerCase() === 'connected') {
@@ -395,15 +420,15 @@
           connectionStatus.className = 'alert alert-error mb-4 text-center text-sm sm:text-base';
         }
       }
-      
+
       function formatTime(seconds) {
         const minutes = Math.floor(seconds / 60);
         const remainingSeconds = seconds % 60;
         return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
       }
-      
+
       function getStatusBadge(status) {
-        switch(status) {
+        switch (status) {
           case 'created': return '<span class="badge badge-xs sm:badge-sm badge-info">Created</span>';
           case 'ready': return '<span class="badge badge-xs sm:badge-sm badge-info">Ready</span>';
           case 'running': return '<span class="badge badge-xs sm:badge-sm badge-success">Running</span>';
@@ -412,7 +437,7 @@
           default: return `<span class="badge badge-xs sm:badge-sm">${status}</span>`;
         }
       }
-      
+
       function displayRooms(rooms) {
         roomList.innerHTML = '';
         if (!rooms || rooms.length === 0) {
@@ -422,24 +447,24 @@
           roomList.appendChild(emptyItem);
           return;
         }
-        
+
         // Sort rooms: current room first, then public rooms, then private rooms
         const sortedRooms = [...rooms].sort((a, b) => {
           // Current room comes first
           if (a.id === currentRoomId) return -1;
           if (b.id === currentRoomId) return 1;
-          
+
           const aIsPublic = a.is_public === 1 || a.is_public === true;
           const bIsPublic = b.is_public === 1 || b.is_public === true;
-          
+
           // Then public rooms
           if (aIsPublic && !bIsPublic) return -1;
           if (!aIsPublic && bIsPublic) return 1;
-          
+
           // Otherwise sort by name
           return (a.name || '').localeCompare(b.name || '');
         });
-        
+
         sortedRooms.forEach(room => {
           const roomItem = document.createElement('div');
           roomItem.className = 'bg-gray-700 rounded mb-2 text-sm sm:text-base';
@@ -447,22 +472,22 @@
             roomItem.classList.add('current-room');
           }
           roomItem.setAttribute('data-room-id', room.id);
-          
+
           // Container for room info
           const roomContent = document.createElement('div');
           roomContent.className = 'p-2 flex flex-col';
-          
+
           // Flex container for room header
           const roomHeader = document.createElement('div');
           roomHeader.className = 'flex justify-between items-center';
-          
+
           // Room name with icon 
           const isPublic = room.is_public === 1 || room.is_public === true;
           const clientCount = room.client_count || 0;
           const roomNameEl = document.createElement('div');
           roomNameEl.className = 'font-semibold flex items-center gap-1';
           roomNameEl.innerHTML = `${isPublic ? '<i class="fas fa-globe text-xs"></i>' : '<i class="fas fa-lock text-xs"></i>'} ${room.name || 'Unnamed Room'}`;
-          
+
           // Status badge
           const statusBadge = document.createElement('div');
           if (room.id === currentRoomId) {
@@ -472,33 +497,86 @@
             statusBadge.className = 'badge badge-sm badge-ghost';
             statusBadge.textContent = `${clientCount} users`;
           }
-          
+
           roomHeader.appendChild(roomNameEl);
           roomHeader.appendChild(statusBadge);
           roomContent.appendChild(roomHeader);
-          
-          // Room ID (show only if it's not the current room)
-          if (room.id !== currentRoomId) {
-            const roomIdEl = document.createElement('div');
-            roomIdEl.className = 'text-xs opacity-60 mb-2 truncate';
-            roomIdEl.textContent = `ID: ${room.id}`;
-            roomContent.appendChild(roomIdEl);
+
+          // Room ID and invite token section
+          const infoContainer = document.createElement('div');
+          infoContainer.className = 'mb-2';
+
+          // Room ID for all rooms
+          const roomIdEl = document.createElement('div');
+          roomIdEl.className = 'text-xs opacity-60 truncate';
+          roomIdEl.textContent = `ID: ${room.id}`;
+          infoContainer.appendChild(roomIdEl);
+
+          // Add invite token for private rooms or current room
+          if ((!isPublic && room.invite_token) || room.id === currentRoomId) {
+            const inviteTokenEl = document.createElement('div');
+            inviteTokenEl.className = 'text-xs opacity-60 truncate flex gap-1 items-center';
+
+            // Show a copy button for invite tokens
+            const inviteToken = room.invite_token || '';
+
+            if (inviteToken) {
+              // Create a copy button for the invite token
+              const copyBtn = document.createElement('button');
+              copyBtn.className = 'btn btn-xs btn-ghost btn-square p-0';
+              copyBtn.innerHTML = '<i class="fas fa-copy text-xs"></i>';
+              copyBtn.title = 'Copy invite token';
+              copyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(inviteToken)
+                  .then(() => {
+                    copyBtn.innerHTML = '<i class="fas fa-check text-xs text-success"></i>';
+                    setTimeout(() => {
+                      copyBtn.innerHTML = '<i class="fas fa-copy text-xs"></i>';
+                    }, 2000);
+                  })
+                  .catch(() => {
+                    copyBtn.innerHTML = '<i class="fas fa-times text-xs text-error"></i>';
+                    setTimeout(() => {
+                      copyBtn.innerHTML = '<i class="fas fa-copy text-xs"></i>';
+                    }, 2000);
+                  });
+              });
+
+              // Text content
+              const tokenText = document.createElement('span');
+              tokenText.className = 'truncate';
+              tokenText.textContent = `Invite: ${inviteToken}`;
+
+              inviteTokenEl.appendChild(tokenText);
+              inviteTokenEl.appendChild(copyBtn);
+            } else {
+              inviteTokenEl.textContent = `Invite: None`;
+            }
+
+            infoContainer.appendChild(inviteTokenEl);
           }
-          
+
+          roomContent.appendChild(infoContainer);
+
           // Join button (only if not current room)
           if (room.id !== currentRoomId) {
+            const joinButtonsContainer = document.createElement('div');
+            joinButtonsContainer.className = 'flex gap-1';
+
+            // Main join button
             const joinButton = document.createElement('button');
-            joinButton.className = 'btn btn-primary btn-xs w-full mt-1';
+            joinButton.className = 'btn btn-primary btn-xs flex-1 mt-1';
             joinButton.innerHTML = '<i class="fas fa-sign-in-alt mr-1"></i> Join';
             joinButton.addEventListener('click', (e) => {
               e.stopPropagation(); // Prevent triggering the parent's click
               selectedRoomId = room.id;
-              
+
               if (isPublic) {
                 // Join public room directly
-                const message = { 
-                  type: 'join_room', 
-                  roomId: room.id 
+                const message = {
+                  type: 'join_room',
+                  roomId: room.id
                 };
                 ws.send(JSON.stringify(message));
                 logMessage('Joining public room', message);
@@ -509,103 +587,131 @@
                 document.getElementById('join-private-modal').classList.add('modal-open');
               }
             });
-            roomContent.appendChild(joinButton);
+
+            // Quick join via invite button for private rooms
+            if (!isPublic && room.invite_token) {
+              const quickJoinButton = document.createElement('button');
+              quickJoinButton.className = 'btn btn-secondary btn-xs mt-1';
+              quickJoinButton.innerHTML = '<i class="fas fa-key"></i>';
+              quickJoinButton.title = 'Quick join via invite token';
+              quickJoinButton.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent triggering the parent's click
+                selectedRoomId = room.id;
+
+                // Join private room via invite token
+                const message = {
+                  type: 'join_room',
+                  inviteToken: room.invite_token
+                };
+                ws.send(JSON.stringify(message));
+                logMessage('Joining private room via invite token', message);
+              });
+
+              joinButtonsContainer.appendChild(joinButton);
+              joinButtonsContainer.appendChild(quickJoinButton);
+            } else {
+              // For public rooms, just add the main join button with full width
+              joinButton.className = 'btn btn-primary btn-xs w-full mt-1';
+              joinButtonsContainer.appendChild(joinButton);
+            }
+
+            roomContent.appendChild(joinButtonsContainer);
           }
-          
+
           roomItem.appendChild(roomContent);
           roomList.appendChild(roomItem);
         });
       }
-      
+
       // IMPROVED: Fixed startTimerInterval function to handle fullscreen mode
       function startTimerInterval(timer, isFullscreenTimer = false) {
         // Only start intervals for the normal view, and update both views from there
         // This prevents timer desync issues between the two views
         if (isFullscreenTimer) return;
-        
+
         const timerId = timer.id;
-        
+
         if (timerIntervals[timerId]) {
           clearInterval(timerIntervals[timerId]);
         }
         if (timer.status !== 'running') return;
-        
+
         // Find the timer in our roomTimers array to get the most up-to-date state
         const currentTimer = roomTimers.find(t => t.id === timer.id) || timer;
-        
+
         // Use the most up-to-date remaining time
         const remaining = currentTimer.remaining; // seconds
         const startTime = Date.now();
         const totalDuration = currentTimer.duration * 1000; // convert to ms
         const remainingMs = remaining * 1000; // convert to ms
-        
+
         // Update more frequently for smoother animation (every 16ms ≈ 60fps)
         timerIntervals[timerId] = setInterval(() => {
           const elapsedMs = Date.now() - startTime;
           const remainingTimeMs = Math.max(0, remainingMs - elapsedMs);
           const newRemaining = Math.ceil(remainingTimeMs / 1000); // Round up to nearest second for display
-          
+
           // For progress bar, use precise ms values for smooth animation
           const preciseRemaining = remainingTimeMs / 1000; // seconds with decimal precision
-          
+
           // Update the timer in our roomTimers array to keep state synchronized
           const timerIdx = roomTimers.findIndex(t => t.id === currentTimer.id);
           if (timerIdx >= 0) {
             roomTimers[timerIdx].remaining = newRemaining;
             roomTimers[timerIdx].preciseRemaining = preciseRemaining;
           }
-          
+
           // Update normal view
-          updateTimerDisplay({ 
-            ...currentTimer, 
+          updateTimerDisplay({
+            ...currentTimer,
             remaining: newRemaining,
             preciseRemaining: preciseRemaining
           }, false);
-          
+
           // Also update fullscreen view if active
           if (isFullscreen) {
-            updateTimerDisplay({ 
-              ...currentTimer, 
+            updateTimerDisplay({
+              ...currentTimer,
               remaining: newRemaining,
               preciseRemaining: preciseRemaining
             }, true);
           }
-          
+
           if (remainingTimeMs <= 0) {
             clearInterval(timerIntervals[timerId]);
             delete timerIntervals[timerId];
-            
+
             // Mark as completed and update UI
             const completedTimer = {
               ...currentTimer,
               remaining: 0,
               status: 'completed'
             };
-            
+
             // Update the timer in our roomTimers array
             const idx = roomTimers.findIndex(t => t.id === currentTimer.id);
             if (idx >= 0) {
               roomTimers[idx].remaining = 0;
               roomTimers[idx].status = 'completed';
             }
-            
+
             // Update both views
             updateTimerDisplay(completedTimer, false);
             if (isFullscreen) {
               updateTimerDisplay(completedTimer, true);
             }
-            
+
             // Send completed notification to server
             if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ 
-                type: 'timer_completed', 
-                timerId: currentTimer.id 
+              ws.send(JSON.stringify({
+                type: 'timer_completed',
+                timerId: currentTimer.id
               }));
             }
           }
         }, 16); // ~60fps for smooth animation
       }
-      
+
       // Create a timer element function that can be used by both normal and fullscreen modes
       function createTimerElement(timer, isFullscreen = false) {
         // If timer is completed or created, change its status to "ready"
@@ -614,37 +720,37 @@
           timer.status = 'ready';
           timer.remaining = timer.duration; // Reset remaining time to full
         }
-        
+
         const timerItem = document.createElement('div');
-        
+
         // Make fullscreen timers larger
         if (isFullscreen) {
           timerItem.className = 'p-4 sm:p-6 bg-gray-700 rounded mb-4 text-base sm:text-lg';
         } else {
           timerItem.className = 'p-2 sm:p-4 bg-gray-700 rounded mb-2 text-sm sm:text-base';
         }
-        
+
         timerItem.setAttribute('data-timer-id', timer.id);
-        
+
         // Header with timer name and status badge
         const headerDiv = document.createElement('div');
         headerDiv.className = 'flex items-center justify-between mb-1';
         headerDiv.innerHTML = `<strong class="truncate mr-1">${timer.name}</strong> <span class="timer-status">${getStatusBadge(timer.status)}</span>`;
-        
+
         // Progress bar
         const progressContainer = document.createElement('div');
-        
+
         // Make fullscreen progress bar larger
         if (isFullscreen) {
           progressContainer.className = 'w-full bg-gray-600 rounded h-4 sm:h-6 my-2 sm:my-3';
         } else {
           progressContainer.className = 'w-full bg-gray-600 rounded h-2 sm:h-4 my-1 sm:my-2';
         }
-        
+
         const progressBar = document.createElement('div');
         progressBar.className = 'bg-primary h-full rounded';
         progressBar.style.transition = 'width 1s linear';
-        
+
         // Set initial progress bar width based on status
         let progressPercent;
         if (timer.status === 'running') {
@@ -656,25 +762,25 @@
         } else {
           progressPercent = 100; // Default to full bar
         }
-        
+
         progressBar.style.width = `${progressPercent}%`;
         progressContainer.appendChild(progressBar);
-        
+
         // Timer details
         const detailsDiv = document.createElement('div');
-        
+
         // Make fullscreen details larger
         if (isFullscreen) {
           detailsDiv.className = 'flex justify-between text-sm sm:text-base font-semibold';
         } else {
           detailsDiv.className = 'flex justify-between text-xs sm:text-sm';
         }
-        
+
         detailsDiv.innerHTML = `<div>Total: ${formatTime(timer.duration)}</div><div class="timer-remaining">${formatTime(timer.remaining)}</div>`;
-        
+
         // Controls: toggle (start/pause) and reset
         const controlsDiv = document.createElement('div');
-        
+
         // Make fullscreen controls larger
         if (isFullscreen) {
           controlsDiv.className = 'flex gap-2 sm:gap-3 mt-3';
@@ -686,18 +792,18 @@
         const toggleBtn = document.createElement('button');
         if (timer.status === 'running') {
           toggleBtn.innerHTML = '<i class="fas fa-pause sm:mr-1"></i><span class="hidden sm:inline">Pause</span>';
-          toggleBtn.className = isFullscreen ? 
-            'btn btn-warning btn-sm sm:btn-md flex-1' : 
+          toggleBtn.className = isFullscreen ?
+            'btn btn-warning btn-sm sm:btn-md flex-1' :
             'btn btn-warning btn-xs sm:btn-sm flex-1';
           toggleBtn.setAttribute('data-action', 'pause');
         } else {
           toggleBtn.innerHTML = '<i class="fas fa-play sm:mr-1"></i><span class="hidden sm:inline">Start</span>';
-          toggleBtn.className = isFullscreen ? 
-            'btn btn-success btn-sm sm:btn-md flex-1' : 
+          toggleBtn.className = isFullscreen ?
+            'btn btn-success btn-sm sm:btn-md flex-1' :
             'btn btn-success btn-xs sm:btn-sm flex-1';
           toggleBtn.setAttribute('data-action', 'start');
         }
-        
+
         toggleBtn.addEventListener('click', (e) => {
           e.stopPropagation(); // Prevent event bubbling
           const action = toggleBtn.getAttribute('data-action');
@@ -714,8 +820,8 @@
 
         const resetBtn = document.createElement('button');
         resetBtn.innerHTML = '<i class="fas fa-redo-alt sm:mr-1"></i><span class="hidden sm:inline">Reset</span>';
-        resetBtn.className = isFullscreen ? 
-          'btn btn-error btn-sm sm:btn-md flex-1' : 
+        resetBtn.className = isFullscreen ?
+          'btn btn-error btn-sm sm:btn-md flex-1' :
           'btn btn-error btn-xs sm:btn-sm flex-1';
         resetBtn.addEventListener('click', (e) => {
           e.stopPropagation(); // Prevent event bubbling
@@ -727,8 +833,8 @@
         // Add a delete button
         const deleteBtn = document.createElement('button');
         deleteBtn.innerHTML = '<i class="fas fa-trash-alt sm:mr-1"></i><span class="hidden sm:inline">Delete</span>';
-        deleteBtn.className = isFullscreen ? 
-          'btn btn-outline btn-error btn-sm sm:btn-md flex-1' : 
+        deleteBtn.className = isFullscreen ?
+          'btn btn-outline btn-error btn-sm sm:btn-md flex-1' :
           'btn btn-outline btn-error btn-xs sm:btn-sm flex-1';
         deleteBtn.addEventListener('click', (e) => {
           e.stopPropagation(); // Prevent event bubbling
@@ -742,24 +848,24 @@
         controlsDiv.appendChild(toggleBtn);
         controlsDiv.appendChild(resetBtn);
         controlsDiv.appendChild(deleteBtn);
-        
+
         timerItem.appendChild(headerDiv);
         timerItem.appendChild(progressContainer);
         timerItem.appendChild(detailsDiv);
         timerItem.appendChild(controlsDiv);
-        
+
         return timerItem;
       }
-      
+
       // IMPROVED: renderTimerList function to use createTimerElement
       function renderTimerList() {
         timerList.innerHTML = '';
-        
+
         // Update fullscreen list if in fullscreen mode
         if (isFullscreen) {
           fullscreenTimerList.innerHTML = '';
         }
-        
+
         if (!currentRoomId) {
           const emptyItem = document.createElement('div');
           emptyItem.className = 'p-2 bg-gray-700 rounded text-sm sm:text-base';
@@ -774,21 +880,21 @@
           timerList.appendChild(emptyItem);
           return;
         }
-        
+
         // Save current intervals before rebuilding
         const runningTimerIds = Object.keys(timerIntervals);
-        
+
         roomTimers.forEach(timer => {
           // Create timer element for normal view
           const timerItem = createTimerElement(timer);
           timerList.appendChild(timerItem);
-          
+
           // Create timer element for fullscreen view if in fullscreen mode
           if (isFullscreen) {
             const fullscreenTimerItem = createTimerElement(timer, true);
             fullscreenTimerList.appendChild(fullscreenTimerItem);
           }
-          
+
           // Start an interval if timer is running
           if (timer.status === 'running') {
             // Only start a new interval if it wasn't already running
@@ -801,20 +907,20 @@
           }
         });
       }
-      
+
       // IMPROVED: updateTimerDisplay function to support fullscreen mode
       function updateTimerDisplay(timer, isFullscreenTimer = false) {
-        const selector = isFullscreenTimer ? 
-          `#fullscreen-timer-list [data-timer-id="${timer.id}"]` : 
+        const selector = isFullscreenTimer ?
+          `#fullscreen-timer-list [data-timer-id="${timer.id}"]` :
           `#timer-list [data-timer-id="${timer.id}"]`;
-        
+
         const timerElement = document.querySelector(selector);
         if (!timerElement) return;
-        
+
         const progressBar = timerElement.querySelector('.bg-primary');
         const remainingTimeElement = timerElement.querySelector('.timer-remaining');
         const statusElement = timerElement.querySelector('.timer-status');
-        
+
         // If timer is at 0 remaining, automatically set status to completed
         if (timer.remaining <= 0 && timer.status === 'running') {
           timer.status = 'completed';
@@ -824,7 +930,7 @@
             delete timerIntervals[timerId];
           }
         }
-        
+
         // Set progress bar based on status
         let progressPercent;
         if (timer.status === 'running') {
@@ -841,48 +947,48 @@
           // For all other statuses (created, paused), show percentage
           progressPercent = Math.max(0, Math.min(100, (timer.remaining / timer.duration) * 100));
         }
-        
+
         progressBar.style.width = `${progressPercent}%`;
-        
+
         // Add high-quality animation for running timers
         if (timer.status === 'running') {
           progressBar.style.transition = 'width 1s linear';
-          
-          } else {
+
+        } else {
           progressBar.style.transition = 'width 0.3s ease';
         }
-        
+
         remainingTimeElement.textContent = formatTime(timer.remaining);
-        
+
         // Update status
         if (statusElement.innerHTML !== getStatusBadge(timer.status)) {
           statusElement.innerHTML = getStatusBadge(timer.status);
         }
-        
+
         // Update the toggle button based on status
         const toggleBtn = timerElement.querySelector('button[data-action]');
         if (toggleBtn) {
           const currentAction = toggleBtn.getAttribute('data-action');
           const newAction = timer.status === 'running' ? 'pause' : 'start';
-          
+
           if (currentAction !== newAction) {
             if (timer.status === 'running') {
               toggleBtn.innerHTML = '<i class="fas fa-pause sm:mr-1"></i><span class="hidden sm:inline">Pause</span>';
-              toggleBtn.className = isFullscreenTimer ? 
-                'btn btn-warning btn-sm sm:btn-md flex-1' : 
+              toggleBtn.className = isFullscreenTimer ?
+                'btn btn-warning btn-sm sm:btn-md flex-1' :
                 'btn btn-warning btn-xs sm:btn-sm flex-1';
               toggleBtn.setAttribute('data-action', 'pause');
             } else {
               toggleBtn.innerHTML = '<i class="fas fa-play sm:mr-1"></i><span class="hidden sm:inline">Start</span>';
-              toggleBtn.className = isFullscreenTimer ? 
-                'btn btn-success btn-sm sm:btn-md flex-1' : 
+              toggleBtn.className = isFullscreenTimer ?
+                'btn btn-success btn-sm sm:btn-md flex-1' :
                 'btn btn-success btn-xs sm:btn-sm flex-1';
               toggleBtn.setAttribute('data-action', 'start');
             }
           }
         }
       }
-      
+
       function updateUIForRoomJoined(room) {
         currentRoomId = room.id;
         currentRoomName.textContent = room.name;
@@ -891,68 +997,87 @@
         roomDetails.classList.remove('hidden');
         leaveRoomBtn.disabled = false;
         createTimerBtn.disabled = false;
-        
+
         // Enable fullscreen button when we join a room
         fullscreenBtn.disabled = false;
-        
+
         // Update fullscreen room name if in fullscreen mode
         if (isFullscreen) {
           fullscreenRoomName.textContent = room.name;
         }
-        
+
         // Close the modal if it's open
         joinPrivateModal.classList.remove('modal-open');
-        
+
         // Update room list to show current room
         document.querySelectorAll('[data-room-id].selected-room, [data-room-id].current-room').forEach(el => {
           el.classList.remove('selected-room');
           el.classList.remove('current-room');
         });
-        
+
         const currentRoomElement = document.querySelector(`[data-room-id="${room.id}"]`);
         if (currentRoomElement) {
           currentRoomElement.classList.add('current-room');
         }
-        
+
         // If this is a private room that's not in our list, add it
         const isInList = availableRooms.some(r => r.id === room.id);
         if (!isInList) {
-          availableRooms.push(room);
-          displayRooms(availableRooms);
+          // Make sure we have the invite token in the room object for private rooms
+          if (!room.is_public && room.invite_token) {
+            availableRooms.push(room);
+            displayRooms(availableRooms);
+          } else {
+            // For rooms without the invite token in their data
+            const existingRooms = [...availableRooms];
+            availableRooms.push(room);
+            displayRooms(availableRooms);
+          }
+        } else {
+          // Update existing room in the list with latest data including invite token
+          const roomIndex = availableRooms.findIndex(r => r.id === room.id);
+          if (roomIndex !== -1) {
+            // Preserve the invite token if it exists in the current data but not in the update
+            if (!room.invite_token && availableRooms[roomIndex].invite_token) {
+              room.invite_token = availableRooms[roomIndex].invite_token;
+            }
+            availableRooms[roomIndex] = { ...availableRooms[roomIndex], ...room };
+            displayRooms(availableRooms);
+          }
         }
       }
-      
+
       function updateUIForRoomLeft() {
         currentRoomId = null;
         currentRoomName.textContent = 'None';
         roomDetails.classList.add('hidden');
         leaveRoomBtn.disabled = true;
         createTimerBtn.disabled = true;
-        
+
         // Disable fullscreen button when we leave a room
         fullscreenBtn.disabled = true;
-        
+
         // Exit fullscreen mode if active
         if (isFullscreen) {
           exitFullscreenMode();
         }
-        
+
         selectedRoomId = null;
         roomTimers = [];
         renderTimerList();
-        
+
         // Clear any active timers
         Object.keys(timerIntervals).forEach(timerId => {
           clearInterval(timerIntervals[timerId]);
           delete timerIntervals[timerId];
         });
-        
+
         // Update the room list to reflect that we're not in any room
         document.querySelectorAll('[data-room-id].current-room').forEach(el => {
           el.classList.remove('current-room');
         });
       }
-      
+
       // WebSocket connection handling
       function connectToServer() {
         const serverUrl = serverUrlInput.value.trim();
@@ -994,9 +1119,20 @@
             try {
               const message = JSON.parse(event.data);
               logMessage('Received message', message);
-              switch(message.type) {
+              switch (message.type) {
                 case 'available_rooms':
-                  availableRooms = message.rooms || [];
+                  // Store the current available rooms, preserving any invite tokens we already have
+                  const updatedRooms = message.rooms || [];
+
+                  // Preserve invite tokens from existing rooms
+                  updatedRooms.forEach(newRoom => {
+                    const existingRoom = availableRooms.find(r => r.id === newRoom.id);
+                    if (existingRoom && existingRoom.invite_token && !newRoom.invite_token) {
+                      newRoom.invite_token = existingRoom.invite_token;
+                    }
+                  });
+
+                  availableRooms = updatedRooms;
                   displayRooms(availableRooms);
                   break;
                 case 'room_created':
@@ -1022,7 +1158,7 @@
                   roomTimers.push(message.timer);
                   renderTimerList();
                   break;
-                  
+
                 // IMPROVED: Updated WebSocket handlers for timer events  
                 case 'timer_started':
                   logMessage('Timer started', message.timer);
@@ -1110,7 +1246,7 @@
                     updateTimerDisplay(completedTimer, true);
                   }
                   break;
-                  
+
                 case 'timer_deleted':
                   logMessage('Timer deleted', message);
                   // Remove the timer from the list
@@ -1164,18 +1300,18 @@
           logMessage('Connection error', error.message);
         }
       }
-      
+
       function disconnectFromServer() {
         if (ws) {
           ws.close();
           ws = null;
         }
       }
-      
+
       // Event listeners
       connectBtn.addEventListener('click', connectToServer);
       disconnectBtn.addEventListener('click', disconnectFromServer);
-      
+
       // Create room event
       createRoomBtn.addEventListener('click', () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1199,22 +1335,22 @@
         ws.send(JSON.stringify(message));
         logMessage('Creating room', message);
       });
-      
+
       // Join private room button event (open modal)
       joinPrivateBtn.addEventListener('click', () => {
         joinPrivateModal.classList.add('modal-open');
         inviteTab.click(); // Default to invite tab
       });
-      
+
       // Close modal when backdrop is clicked or cancel button is pressed
       modalBackdrop.addEventListener('click', () => {
         joinPrivateModal.classList.remove('modal-open');
       });
-      
+
       cancelJoinBtn.addEventListener('click', () => {
         joinPrivateModal.classList.remove('modal-open');
       });
-      
+
       // Tab switching in the modal
       inviteTab.addEventListener('click', () => {
         inviteTab.classList.add('tab-active');
@@ -1222,24 +1358,24 @@
         invitePanel.classList.remove('hidden');
         passwordPanel.classList.add('hidden');
       });
-      
+
       passwordTab.addEventListener('click', () => {
         passwordTab.classList.add('tab-active');
         inviteTab.classList.remove('tab-active');
         passwordPanel.classList.remove('hidden');
         invitePanel.classList.add('hidden');
       });
-      
+
       // Join private room from modal
       joinPrivateRoomBtn.addEventListener('click', () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           alert('Not connected to server');
           return;
         }
-        
+
         // Check which tab is active
         const isInviteActive = inviteTab.classList.contains('tab-active');
-        
+
         if (isInviteActive) {
           // Join via invite token
           const inviteToken = joinInviteTokenInput.value.trim();
@@ -1247,7 +1383,7 @@
             alert('Please enter an invite token');
             return;
           }
-          
+
           const message = {
             type: 'join_room',
             inviteToken: inviteToken
@@ -1258,26 +1394,26 @@
           // Join via room ID and password
           const roomId = joinRoomIdInput.value.trim();
           const password = joinRoomPasswordInput.value.trim();
-          
+
           if (!roomId) {
             alert('Please enter a room ID');
             return;
           }
-          
+
           const message = {
             type: 'join_room',
             roomId: roomId
           };
-          
+
           if (password) {
             message.password = password;
           }
-          
+
           ws.send(JSON.stringify(message));
           logMessage('Joining room via ID and password', message);
         }
       });
-      
+
       // Leave room
       leaveRoomBtn.addEventListener('click', () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1291,7 +1427,7 @@
         ws.send(JSON.stringify({ type: 'leave_room' }));
         logMessage('Leaving room');
       });
-      
+
       createTimerBtn.addEventListener('click', () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           alert('Not connected to server');
@@ -1319,14 +1455,15 @@
         ws.send(JSON.stringify(message));
         logMessage('Creating timer', message);
       });
-      
+
       // Initial setup
       fullscreenBtn.disabled = true; // Disable fullscreen button until in a room
-      
+
       if (serverUrlInput.value) {
         connectBtn.click();
       }
     }
   </script>
 </body>
+
 </html>
