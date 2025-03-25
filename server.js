@@ -232,20 +232,124 @@ const wss = new WebSocket.Server({ server });
 // Clients collection
 const clients = new Map();
 
-// Global keep-alive ping interval
-const interval = setInterval(() => {
+// Helper function for batch client updates
+async function updateClientBatch(clientUpdates, now) {
+  for (const update of clientUpdates) {
+    try {
+      if (update.needsCleanup) {
+        // For clients that were terminated, remove them from database
+        await runQuery(`DELETE FROM clients WHERE id = ?`, [update.id]);
+        console.log(`Cleaned up terminated client ${update.id}`);
+      } else if (update.lastSeen) {
+        // For active clients, update their last_seen time
+        await runQuery(`
+          UPDATE clients 
+          SET last_seen = ? 
+          WHERE id = ?
+        `, [update.lastSeen, update.id]);
+      }
+    } catch (error) {
+      console.error(`Error updating client ${update.id}:`, error);
+    }
+  }
+}
+
+// Global keep-alive ping interval and client last_seen updater
+const keepAliveInterval = setInterval(() => {
+  const now = Math.floor(Date.now() / 1000);
+  const clientUpdates = [];
+  
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
       console.log('Terminating dead client');
+      try {
+        const clientInfo = clients.get(ws);
+        if (clientInfo) {
+          // Store client ID before termination to ensure proper cleanup
+          console.log(`Marking client ${clientInfo.id} for cleanup`);
+          // Add to batch updates
+          clientUpdates.push({
+            id: clientInfo.id,
+            needsCleanup: true
+          });
+        }
+      } catch (error) {
+        console.error('Error preparing client for termination:', error);
+      }
       return ws.terminate();
     }
+    
+    // Update last_seen time for active clients
     ws.isAlive = false;
     ws.ping();
+    
+    const clientInfo = clients.get(ws);
+    if (clientInfo) {
+      // Add to batch updates
+      clientUpdates.push({
+        id: clientInfo.id,
+        lastSeen: now,
+        needsCleanup: false
+      });
+    }
   });
+  
+  // Batch update last_seen times and cleanup terminated clients
+  if (clientUpdates.length > 0) {
+    updateClientBatch(clientUpdates, now);
+  }
 }, 30000);
 
+// Create a periodic reconciliation interval (runs every 2 minutes)
+const reconciliationInterval = setInterval(async () => {
+  try {
+    console.log("Starting client reconciliation...");
+    
+    // Get all clients from the database
+    const dbClients = await getAll("SELECT * FROM clients");
+    
+    // Create a set of client IDs that are currently connected in-memory
+    const connectedClientIds = new Set();
+    for (const [ws, clientInfo] of clients.entries()) {
+      connectedClientIds.add(clientInfo.id);
+    }
+    
+    // Find clients in the database that no longer exist in-memory
+    const orphanedClients = dbClients.filter(
+      dbClient => !connectedClientIds.has(dbClient.id)
+    );
+    
+    if (orphanedClients.length > 0) {
+      console.log(`Found ${orphanedClients.length} orphaned clients in database`);
+      
+      for (const orphan of orphanedClients) {
+        try {
+          await runQuery(`DELETE FROM clients WHERE id = ?`, [orphan.id]);
+          console.log(`Removed orphaned client ${orphan.id} from database`);
+          
+          // Notify the room if this orphaned client was in a room
+          if (orphan.room_id) {
+            broadcastToRoom(orphan.room_id, {
+              type: 'client_left',
+              clientId: orphan.id
+            });
+          }
+        } catch (err) {
+          console.error(`Error removing orphaned client ${orphan.id}:`, err);
+        }
+      }
+    } else {
+      console.log("No orphaned clients found");
+    }
+  } catch (error) {
+    console.error("Error during client reconciliation:", error);
+  }
+}, 2 * 60 * 1000);  // Run every 2 minutes
+
 wss.on('close', () => {
-  clearInterval(interval);
+  clearInterval(keepAliveInterval);
+  clearInterval(reconciliationInterval);
+  clearInterval(cleanupInterval);
 });
 
 // Broadcast to all clients in a specific room
@@ -372,12 +476,23 @@ wss.on('connection', async (ws, req) => {
         default:
           console.warn(`Unknown message type: ${message.type}`);
       }
+      
+      // Update the client's last_seen time after processing any message
+      try {
+        await runQuery(`
+          UPDATE clients 
+          SET last_seen = ? 
+          WHERE id = ?
+        `, [now, clientInfo.id]);
+      } catch (err) {
+        console.error(`Error updating last_seen for client ${clientInfo.id}:`, err);
+      }
     } catch (error) {
       console.error('Error processing message:', error);
     }
   });
   
-  // Handle disconnection with cleanup
+  // Handle disconnection with improved cleanup
   ws.on('close', async () => {
     const clientInfo = clients.get(ws);
     if (clientInfo) {
@@ -394,9 +509,22 @@ wss.on('connection', async (ws, req) => {
       
       // Immediately remove client entry from database upon disconnect
       try {
-        await runQuery(`DELETE FROM clients WHERE id = ?`, [clientInfo.id]);
+        const result = await runQuery(`DELETE FROM clients WHERE id = ?`, [clientInfo.id]);
+        console.log(`Client ${clientInfo.id} deleted from database, affected rows: ${result.changes}`);
       } catch (err) {
         console.error(`Error deleting client ${clientInfo.id} from database:`, err);
+        
+        // Failsafe: if delete fails, mark as inactive
+        try {
+          await runQuery(`
+            UPDATE clients
+            SET room_id = NULL, last_seen = 0
+            WHERE id = ?
+          `, [clientInfo.id]);
+          console.log(`Client ${clientInfo.id} marked as inactive (failsafe)`);
+        } catch (innerErr) {
+          console.error(`Complete failure to cleanup client ${clientInfo.id}:`, innerErr);
+        }
       }
     }
   });
@@ -894,30 +1022,53 @@ async function handleDeleteTimer(message, ws, clientInfo) {
   }
 }
 
-// Start the server by listening on the specified port
-server.listen(PORT, () => {
-  console.log(`Room-based Timer WebSocket server running on port ${PORT}`);
-});
-
 // Cleanup old clients periodically (every 5 minutes)
-setInterval(async () => {
+const cleanupInterval = setInterval(async () => {
   const cutoff = Math.floor(Date.now() / 1000) - 3600; // 1 hour
   
   try {
+    // Get clients that should be cleaned up to notify their rooms
+    const clientsToClean = await getAll(
+      'SELECT id, room_id FROM clients WHERE last_seen < ?', 
+      [cutoff]
+    );
+    
+    // Send notifications for each client before deletion
+    for (const client of clientsToClean) {
+      if (client.room_id) {
+        broadcastToRoom(client.room_id, {
+          type: 'client_left',
+          clientId: client.id
+        });
+      }
+    }
+    
+    // Now delete the inactive clients
     const result = await runQuery('DELETE FROM clients WHERE last_seen < ?', [cutoff]);
-    console.log(`Cleaned up ${result.changes} inactive clients`);
+    console.log(`Cleaned up ${result.changes} inactive clients (inactive > 1 hour)`);
   } catch (error) {
     console.error('Error cleaning up clients:', error);
   }
 }, 5 * 60 * 1000);
 
+// Start the server by listening on the specified port
+server.listen(PORT, () => {
+  console.log(`Room-based Timer WebSocket server running on port ${PORT}`);
+});
+
 // Close database connection when the server is shutting down
 process.on('SIGINT', () => {
   db.close();
+  clearInterval(keepAliveInterval);
+  clearInterval(reconciliationInterval);
+  clearInterval(cleanupInterval);
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   db.close();
+  clearInterval(keepAliveInterval);
+  clearInterval(reconciliationInterval);
+  clearInterval(cleanupInterval);
   process.exit(0);
 });
