@@ -649,7 +649,7 @@
         timerIntervals[timerId] = setInterval(() => {
           const elapsedMs = Date.now() - startTime;
           const remainingTimeMs = Math.max(0, remainingMs - elapsedMs);
-          const newRemaining = Math.ceil(remainingTimeMs / 1000); // Round up to nearest second for display
+          const newRemaining = Math.floor(remainingTimeMs / 1000);
 
           // For progress bar, use precise ms values for smooth animation
           const preciseRemaining = remainingTimeMs / 1000; // seconds with decimal precision
