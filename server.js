@@ -1211,6 +1211,7 @@ function getEotmHealth() {
 function notifyEotmAdmins() {
   const status = getEotmStatus();
   const payload = JSON.stringify(status);
+  console.log(`EOTM notify admins: clients=${status.total_clients} instances=${Object.keys(status.instances).length} machines=${Object.keys(status.machines).length} outside=${status.outside ? status.outside.length : 0}`);
   for (const admin of eotmAdmins) {
     if (admin.readyState === WebSocket.OPEN) {
       admin.send(payload);
@@ -1555,6 +1556,7 @@ eotmWss.on('connection', (ws, req) => {
         break;
       case 'map_leave':
         {
+          console.log('EOTM map_leave received:', message);
           const update = {
             server_ip: null
           };
@@ -1578,6 +1580,7 @@ eotmWss.on('connection', (ws, req) => {
             update.leave_reason = message.reason || null;
           }
           updateEotmClientMapping(ws, update, timestamp);
+          console.log('EOTM map_leave applied:', eotmClients.get(ws));
         }
         notifyEotmAdmins();
         break;
