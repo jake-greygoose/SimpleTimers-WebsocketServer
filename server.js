@@ -1581,6 +1581,30 @@ eotmWss.on('connection', (ws, req) => {
         }
         notifyEotmAdmins();
         break;
+      case 'status':
+        {
+          const update = {};
+          if (Object.prototype.hasOwnProperty.call(message, 'server_ip')) {
+            const normalized = normalizeServerIp(message.server_ip);
+            if (normalized) update.server_ip = normalized;
+            if (!normalized && message.in_eotm === false) update.server_ip = null;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'character')) {
+            const normalized = normalizeCharacter(message.character);
+            if (normalized) update.character = normalized;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'account')) {
+            const normalized = normalizeAccount(message.account);
+            if (normalized) update.account = normalized;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'machine')) {
+            const normalized = normalizeMachine(message.machine);
+            if (normalized) update.machine = normalized;
+          }
+          updateEotmClientMapping(ws, update, timestamp);
+        }
+        notifyEotmAdmins();
+        break;
       case 'pong':
         updateEotmClientMapping(ws, {}, timestamp);
         break;
