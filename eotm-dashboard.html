@@ -60,6 +60,9 @@
             <button id="focus-all-btn" class="btn btn-secondary flex-1">Focus All (1/sec per machine)</button>
           </div>
           <div class="flex gap-2">
+            <button id="reconnect-outside-btn" class="btn btn-accent flex-1">Reconnect Outside EOTM</button>
+          </div>
+          <div class="flex gap-2">
             <button id="disable-fps-btn" class="btn btn-info flex-1">Disable FPS Limiter</button>
             <button id="close-all-btn" class="btn btn-error flex-1">Close All</button>
           </div>
@@ -106,6 +109,14 @@
         <div id="machines-list" class="space-y-3"></div>
       </div>
     </div>
+
+    <div class="card bg-gray-800 p-4 mt-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">Outside EOTM</h2>
+        <span class="text-xs text-gray-400">Clients without an active instance</span>
+      </div>
+      <div id="outside-list" class="space-y-3"></div>
+    </div>
   </div>
 
   <script>
@@ -118,6 +129,7 @@
     const totalMachines = document.getElementById('total-machines');
     const instancesList = document.getElementById('instances-list');
     const machinesList = document.getElementById('machines-list');
+    const outsideList = document.getElementById('outside-list');
 
     function buildDefaultWsUrl() {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -169,6 +181,7 @@
     function renderStatus(status) {
       const instances = status.instances || {};
       const machines = status.machines || {};
+      const outside = status.outside || [];
 
       totalClients.textContent = status.total_clients || 0;
       totalInstances.textContent = Object.keys(instances).length;
@@ -271,6 +284,39 @@
       if (Object.keys(machines).length === 0) {
         machinesList.innerHTML = '<div class="text-sm text-gray-400">No active machines.</div>';
       }
+
+      outsideList.innerHTML = '';
+      if (outside.length === 0) {
+        outsideList.innerHTML = '<div class="text-sm text-gray-400">All clients are currently in EOTM.</div>';
+      } else {
+        outside.forEach(client => {
+          const container = document.createElement('div');
+          container.className = 'bg-gray-700 rounded p-3';
+
+          const accountLabel = client.account ? ` <span class="text-xs text-gray-400">(${client.account})</span>` : '';
+          const reasonLabel = client.leave_reason ? ` <span class="text-xs text-gray-400">Reason: ${client.leave_reason}</span>` : '';
+          const lastServer = client.last_server_ip ? ` <span class="text-xs text-gray-400">Last: ${client.last_server_ip}</span>` : '';
+          const reconnectStatus = client.reconnect_status ? ` <span class="text-xs text-gray-400">Status: ${client.reconnect_status}${client.reconnect_reason ? ` (${client.reconnect_reason})` : ''}</span>` : '';
+
+          const header = document.createElement('div');
+          header.className = 'flex items-center justify-between gap-2';
+          header.innerHTML = `<div>${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>${lastServer}${reasonLabel}${reconnectStatus}</div>`;
+
+          const reconnectBtn = document.createElement('button');
+          reconnectBtn.className = 'btn btn-xs btn-accent';
+          reconnectBtn.textContent = 'Reconnect';
+          reconnectBtn.addEventListener('click', () => sendMessage({
+            type: 'reconnect_client',
+            character: client.character,
+            machine: client.machine,
+            account: client.account || null
+          }));
+
+          header.appendChild(reconnectBtn);
+          container.appendChild(header);
+          outsideList.appendChild(container);
+        });
+      }
     }
 
     document.getElementById('reconnect-btn').addEventListener('click', () => connect());
@@ -305,6 +351,10 @@
 
     document.getElementById('focus-all-btn').addEventListener('click', () => {
       sendMessage({ type: 'focus_all' });
+    });
+
+    document.getElementById('reconnect-outside-btn').addEventListener('click', () => {
+      sendMessage({ type: 'reconnect_all_outside' });
     });
 
     document.getElementById('close-machine-btn').addEventListener('click', () => {

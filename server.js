@@ -1118,6 +1118,7 @@ function removeFromGroup(map, key, ws) {
 function getEotmStatus() {
   const instances = {};
   const machines = {};
+  const outside = [];
 
   for (const [serverIp, wsSet] of eotmInstances.entries()) {
     instances[serverIp] = [];
@@ -1145,11 +1146,26 @@ function getEotmStatus() {
     }
   }
 
+  for (const info of eotmClients.values()) {
+    if (!info.server_ip) {
+      outside.push({
+        character: info.character || 'Unknown',
+        account: info.account || '',
+        machine: info.machine || 'Unknown',
+        last_server_ip: info.last_server_ip || null,
+        leave_reason: info.leave_reason || null,
+        reconnect_status: info.reconnect_status || null,
+        reconnect_reason: info.reconnect_reason || null
+      });
+    }
+  }
+
   return {
     type: 'status',
     total_clients: eotmClients.size,
     instances,
-    machines
+    machines,
+    outside
   };
 }
 
@@ -1187,6 +1203,10 @@ function updateEotmClientMapping(ws, update, now) {
     account: null,
     server_ip: null,
     machine: null,
+    last_server_ip: null,
+    leave_reason: null,
+    reconnect_status: null,
+    reconnect_reason: null,
     last_update: now
   };
 
@@ -1218,6 +1238,22 @@ function updateEotmClientMapping(ws, update, now) {
 
   if (Object.prototype.hasOwnProperty.call(update, 'account')) {
     current.account = update.account || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(update, 'last_server_ip')) {
+    current.last_server_ip = update.last_server_ip || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(update, 'leave_reason')) {
+    current.leave_reason = update.leave_reason || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(update, 'reconnect_status')) {
+    current.reconnect_status = update.reconnect_status || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(update, 'reconnect_reason')) {
+    current.reconnect_reason = update.reconnect_reason || null;
   }
 
   current.last_update = now;
@@ -1358,6 +1394,38 @@ function focusAll() {
   console.log('EOTM focus_all queued');
 }
 
+function reconnectMatching(predicate) {
+  let count = 0;
+  for (const [ws, info] of eotmClients.entries()) {
+    if (predicate(info)) {
+      sendEotmCommand(ws, 'reconnect');
+      count += 1;
+    }
+  }
+  console.log(`EOTM reconnect issued to ${count} client(s)`);
+}
+
+function reconnectClient(target) {
+  reconnectMatching((info) => {
+    if (!info) return false;
+    if (target.machine && info.machine !== target.machine) return false;
+    if (target.character && info.character !== target.character) return false;
+    if (Object.prototype.hasOwnProperty.call(target, 'account')) {
+      if (target.account && info.account !== target.account) return false;
+      if (!target.account && info.account) return false;
+    }
+    return true;
+  });
+}
+
+function reconnectMachine(machine) {
+  reconnectMatching((info) => info.machine === machine);
+}
+
+function reconnectAllOutside() {
+  reconnectMatching((info) => !info.server_ip);
+}
+
 // EOTM Assist client connections (game addon)
 eotmWss.on('connection', (ws, req) => {
   const now = Date.now();
@@ -1366,6 +1434,10 @@ eotmWss.on('connection', (ws, req) => {
     account: null,
     server_ip: null,
     machine: null,
+    last_server_ip: null,
+    leave_reason: null,
+    reconnect_status: null,
+    reconnect_reason: null,
     last_update: now
   });
 
@@ -1405,7 +1477,9 @@ eotmWss.on('connection', (ws, req) => {
           server_ip: null,
           character: message.character || null,
           account: message.account || null,
-          machine: message.machine || null
+          machine: message.machine || null,
+          last_server_ip: message.last_server_ip || null,
+          leave_reason: message.reason || null
         }, timestamp);
         notifyEotmAdmins();
         break;
@@ -1420,6 +1494,27 @@ eotmWss.on('connection', (ws, req) => {
       case 'minimized':
       case 'focused':
         updateEotmClientMapping(ws, {}, timestamp);
+        break;
+      case 'reconnect_started':
+        updateEotmClientMapping(ws, {
+          reconnect_status: 'reconnect_started',
+          reconnect_reason: null
+        }, timestamp);
+        notifyEotmAdmins();
+        break;
+      case 'reconnect_complete':
+        updateEotmClientMapping(ws, {
+          reconnect_status: 'reconnect_complete',
+          reconnect_reason: null
+        }, timestamp);
+        notifyEotmAdmins();
+        break;
+      case 'reconnect_failed':
+        updateEotmClientMapping(ws, {
+          reconnect_status: 'reconnect_failed',
+          reconnect_reason: message.reason || null
+        }, timestamp);
+        notifyEotmAdmins();
         break;
       default:
         console.warn(`EOTM unknown client message type: ${message.type}`);
@@ -1500,6 +1595,19 @@ eotmAdminWss.on('connection', (ws) => {
         break;
       case 'focus_all':
         focusAll();
+        break;
+      case 'reconnect_client':
+        reconnectClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        });
+        break;
+      case 'reconnect_machine':
+        if (message.machine) reconnectMachine(message.machine);
+        break;
+      case 'reconnect_all_outside':
+        reconnectAllOutside();
         break;
       default:
         console.warn(`EOTM unknown admin message type: ${message.type}`);
