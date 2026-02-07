@@ -1391,6 +1391,14 @@ eotmWss.on('connection', (ws, req) => {
         }, timestamp);
         notifyEotmAdmins();
         break;
+      case 'map_leave':
+        updateEotmClientMapping(ws, {
+          server_ip: null,
+          character: message.character || null,
+          machine: message.machine || null
+        }, timestamp);
+        notifyEotmAdmins();
+        break;
       case 'pong':
         updateEotmClientMapping(ws, {}, timestamp);
         break;
