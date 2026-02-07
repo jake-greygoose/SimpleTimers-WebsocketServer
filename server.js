@@ -1164,25 +1164,29 @@ function updateEotmClientMapping(ws, update, now) {
     last_update: now
   };
 
-  if (update.server_ip && update.server_ip !== current.server_ip) {
-    removeFromGroup(eotmInstances, current.server_ip, ws);
-    addToGroup(eotmInstances, update.server_ip, ws);
-    current.server_ip = update.server_ip;
-  } else if (current.server_ip && !update.server_ip) {
-    removeFromGroup(eotmInstances, current.server_ip, ws);
-    current.server_ip = null;
+  if (Object.prototype.hasOwnProperty.call(update, 'server_ip')) {
+    if (update.server_ip && update.server_ip !== current.server_ip) {
+      removeFromGroup(eotmInstances, current.server_ip, ws);
+      addToGroup(eotmInstances, update.server_ip, ws);
+      current.server_ip = update.server_ip;
+    } else if (!update.server_ip && current.server_ip) {
+      removeFromGroup(eotmInstances, current.server_ip, ws);
+      current.server_ip = null;
+    }
   }
 
-  if (update.machine && update.machine !== current.machine) {
-    removeFromGroup(eotmMachines, current.machine, ws);
-    addToGroup(eotmMachines, update.machine, ws);
-    current.machine = update.machine;
-  } else if (current.machine && !update.machine) {
-    removeFromGroup(eotmMachines, current.machine, ws);
-    current.machine = null;
+  if (Object.prototype.hasOwnProperty.call(update, 'machine')) {
+    if (update.machine && update.machine !== current.machine) {
+      removeFromGroup(eotmMachines, current.machine, ws);
+      addToGroup(eotmMachines, update.machine, ws);
+      current.machine = update.machine;
+    } else if (!update.machine && current.machine) {
+      removeFromGroup(eotmMachines, current.machine, ws);
+      current.machine = null;
+    }
   }
 
-  if (update.character) {
+  if (Object.prototype.hasOwnProperty.call(update, 'character') && update.character) {
     current.character = update.character;
   }
 
