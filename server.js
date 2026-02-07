@@ -44,7 +44,7 @@ async function generateUniqueInviteCode() {
 
 
 // Create a simple HTTP server with improved routing
-  const server = http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
   
@@ -70,6 +70,26 @@ async function generateUniqueInviteCode() {
         res.end(content);
       }
     });
+  } else if (pathname === '/eotm' || pathname === '/eotm/') {
+    const dashboardPath = path.join(__dirname, 'eotm-dashboard.html');
+    fs.readFile(dashboardPath, (err, content) => {
+      if (err) {
+        if (err.code === 'ENOENT') {
+          res.writeHead(404, { 'Content-Type': 'text/html' });
+          res.end('<h1>Error 404: Dashboard file not found</h1><p>Please make sure eotm-dashboard.html exists in the application directory.</p>');
+        } else {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Internal Server Error: ' + err.message);
+        }
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(content);
+      }
+    });
+  } else if (pathname === '/eotm/health') {
+    const health = getEotmHealth();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(health));
   } else {
     // Default response for the root and other routes
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -226,8 +246,32 @@ function calculateCurrentTimerState(timer) {
   };
 }
 
-// Create WebSocket server using the HTTP server (required for WSS on Render.com)
-const wss = new WebSocket.Server({ server });
+// Create WebSocket servers using the HTTP server (required for WSS on Render.com)
+const timerWss = new WebSocket.Server({ noServer: true });
+const eotmWss = new WebSocket.Server({ noServer: true });
+const eotmAdminWss = new WebSocket.Server({ noServer: true });
+
+server.on('upgrade', (req, socket, head) => {
+  const pathname = url.parse(req.url).pathname;
+
+  if (pathname === '/eotm/ws') {
+    eotmWss.handleUpgrade(req, socket, head, (ws) => {
+      eotmWss.emit('connection', ws, req);
+    });
+    return;
+  }
+
+  if (pathname === '/eotm/admin') {
+    eotmAdminWss.handleUpgrade(req, socket, head, (ws) => {
+      eotmAdminWss.emit('connection', ws, req);
+    });
+    return;
+  }
+
+  timerWss.handleUpgrade(req, socket, head, (ws) => {
+    timerWss.emit('connection', ws, req);
+  });
+});
 
 // Clients collection
 const clients = new Map();
@@ -259,7 +303,7 @@ const keepAliveInterval = setInterval(() => {
   const now = Math.floor(Date.now() / 1000);
   const clientUpdates = [];
   
-  wss.clients.forEach((ws) => {
+  timerWss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
       console.log('Terminating dead client');
       try {
@@ -346,7 +390,7 @@ const reconciliationInterval = setInterval(async () => {
   }
 }, 2 * 60 * 1000);  // Run every 2 minutes
 
-wss.on('close', () => {
+timerWss.on('close', () => {
   clearInterval(keepAliveInterval);
   clearInterval(reconciliationInterval);
   clearInterval(cleanupInterval);
@@ -356,7 +400,7 @@ wss.on('close', () => {
 function broadcastToRoom(roomId, message, excludeClient = null) {
   const messageStr = JSON.stringify(message);
   
-  wss.clients.forEach(client => {
+  timerWss.clients.forEach(client => {
     const clientInfo = clients.get(client);
     if (client !== excludeClient && 
         client.readyState === WebSocket.OPEN && 
@@ -372,7 +416,7 @@ function broadcastTimerUpdate(roomId, message, excludeClient = null) {
   const messageStr = JSON.stringify(message);
   const timerId = message.timer ? message.timer.id : null;
   
-  wss.clients.forEach(client => {
+  timerWss.clients.forEach(client => {
     const clientInfo = clients.get(client);
     
     if (client === excludeClient || 
@@ -394,7 +438,7 @@ function broadcastTimerUpdate(roomId, message, excludeClient = null) {
 }
 
 // Handle WebSocket connections
-wss.on('connection', async (ws, req) => {
+timerWss.on('connection', async (ws, req) => {
   // Set up heartbeat mechanism
   ws.isAlive = true;
   ws.on('pong', () => {
@@ -1022,6 +1066,367 @@ async function handleDeleteTimer(message, ws, clientInfo) {
   }
 }
 
+// EOTM Assist WebSocket server state and helpers
+const eotmClients = new Map();
+const eotmInstances = new Map();
+const eotmMachines = new Map();
+const eotmAdmins = new Set();
+
+function addToGroup(map, key, ws) {
+  if (!key) return;
+  let group = map.get(key);
+  if (!group) {
+    group = new Set();
+    map.set(key, group);
+  }
+  group.add(ws);
+}
+
+function removeFromGroup(map, key, ws) {
+  if (!key) return;
+  const group = map.get(key);
+  if (!group) return;
+  group.delete(ws);
+  if (group.size === 0) {
+    map.delete(key);
+  }
+}
+
+function getEotmStatus() {
+  const instances = {};
+  const machines = {};
+
+  for (const [serverIp, wsSet] of eotmInstances.entries()) {
+    instances[serverIp] = [];
+    for (const ws of wsSet) {
+      const info = eotmClients.get(ws);
+      if (!info) continue;
+      instances[serverIp].push({
+        character: info.character || 'Unknown',
+        machine: info.machine || 'Unknown'
+      });
+    }
+  }
+
+  for (const [machine, wsSet] of eotmMachines.entries()) {
+    machines[machine] = [];
+    for (const ws of wsSet) {
+      const info = eotmClients.get(ws);
+      if (!info) continue;
+      machines[machine].push({
+        character: info.character || 'Unknown',
+        server_ip: info.server_ip || null
+      });
+    }
+  }
+
+  return {
+    type: 'status',
+    total_clients: eotmClients.size,
+    instances,
+    machines
+  };
+}
+
+function getEotmHealth() {
+  return {
+    status: 'ok',
+    clients: eotmClients.size,
+    instances: eotmInstances.size,
+    machines: eotmMachines.size
+  };
+}
+
+function notifyEotmAdmins() {
+  const status = getEotmStatus();
+  const payload = JSON.stringify(status);
+  for (const admin of eotmAdmins) {
+    if (admin.readyState === WebSocket.OPEN) {
+      admin.send(payload);
+    }
+  }
+}
+
+function sendEotmCommand(ws, message) {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  if (typeof message === 'string') {
+    ws.send(message);
+  } else {
+    ws.send(JSON.stringify(message));
+  }
+}
+
+function updateEotmClientMapping(ws, update, now) {
+  const current = eotmClients.get(ws) || {
+    character: null,
+    server_ip: null,
+    machine: null,
+    last_update: now
+  };
+
+  if (update.server_ip && update.server_ip !== current.server_ip) {
+    removeFromGroup(eotmInstances, current.server_ip, ws);
+    addToGroup(eotmInstances, update.server_ip, ws);
+    current.server_ip = update.server_ip;
+  } else if (current.server_ip && !update.server_ip) {
+    removeFromGroup(eotmInstances, current.server_ip, ws);
+    current.server_ip = null;
+  }
+
+  if (update.machine && update.machine !== current.machine) {
+    removeFromGroup(eotmMachines, current.machine, ws);
+    addToGroup(eotmMachines, update.machine, ws);
+    current.machine = update.machine;
+  } else if (current.machine && !update.machine) {
+    removeFromGroup(eotmMachines, current.machine, ws);
+    current.machine = null;
+  }
+
+  if (update.character) {
+    current.character = update.character;
+  }
+
+  current.last_update = now;
+  eotmClients.set(ws, current);
+}
+
+function cleanupEotmClient(ws) {
+  const info = eotmClients.get(ws);
+  if (info) {
+    removeFromGroup(eotmInstances, info.server_ip, ws);
+    removeFromGroup(eotmMachines, info.machine, ws);
+  }
+  eotmClients.delete(ws);
+  notifyEotmAdmins();
+}
+
+function closeExcessClients(keepCount) {
+  for (const [serverIp, wsSet] of eotmInstances.entries()) {
+    const clientsArray = Array.from(wsSet);
+    if (clientsArray.length <= keepCount) continue;
+    clientsArray.sort((a, b) => {
+      const aInfo = eotmClients.get(a);
+      const bInfo = eotmClients.get(b);
+      return (bInfo?.last_update || 0) - (aInfo?.last_update || 0);
+    });
+    const toClose = clientsArray.slice(keepCount);
+    for (const ws of toClose) {
+      sendEotmCommand(ws, 'close_game');
+    }
+    console.log(`EOTM close_excess: ${toClose.length} clients closed on server ${serverIp}`);
+  }
+}
+
+function keepPerMachine(keepCount) {
+  for (const [machine, wsSet] of eotmMachines.entries()) {
+    const clientsArray = Array.from(wsSet);
+    if (clientsArray.length <= keepCount) continue;
+    clientsArray.sort((a, b) => {
+      const aInfo = eotmClients.get(a);
+      const bInfo = eotmClients.get(b);
+      return (bInfo?.last_update || 0) - (aInfo?.last_update || 0);
+    });
+    const toClose = clientsArray.slice(keepCount);
+    for (const ws of toClose) {
+      sendEotmCommand(ws, 'close_game');
+    }
+    console.log(`EOTM keep_per_machine: ${toClose.length} clients closed on machine ${machine}`);
+  }
+}
+
+function closeMachine(machine) {
+  const wsSet = eotmMachines.get(machine);
+  if (!wsSet) return;
+  for (const ws of wsSet) {
+    sendEotmCommand(ws, 'close_game');
+  }
+  console.log(`EOTM close_machine: ${machine}`);
+}
+
+function closeServer(serverIp) {
+  const wsSet = eotmInstances.get(serverIp);
+  if (!wsSet) return;
+  for (const ws of wsSet) {
+    sendEotmCommand(ws, { type: 'close_server', server_ip: serverIp });
+  }
+  console.log(`EOTM close_server: ${serverIp}`);
+}
+
+function closeCharacter(character) {
+  for (const [ws, info] of eotmClients.entries()) {
+    if (info.character === character) {
+      sendEotmCommand(ws, { type: 'close_character', character });
+    }
+  }
+  console.log(`EOTM close_character: ${character}`);
+}
+
+function closeAllEotm() {
+  for (const ws of eotmClients.keys()) {
+    sendEotmCommand(ws, 'close_game');
+  }
+  console.log('EOTM close_all issued');
+}
+
+function setFpsAll(fps) {
+  for (const ws of eotmClients.keys()) {
+    sendEotmCommand(ws, { type: 'set_fps', fps });
+  }
+  console.log(`EOTM set_fps_all: ${fps}`);
+}
+
+function disableFpsLimiterAll() {
+  for (const ws of eotmClients.keys()) {
+    sendEotmCommand(ws, 'disable_fps_limiter');
+  }
+  console.log('EOTM disable_fps_limiter_all');
+}
+
+// EOTM Assist client connections (game addon)
+eotmWss.on('connection', (ws, req) => {
+  const now = Date.now();
+  eotmClients.set(ws, {
+    character: null,
+    server_ip: null,
+    machine: null,
+    last_update: now
+  });
+
+  console.log(`EOTM client connected from ${req.socket.remoteAddress || 'unknown'}`);
+
+  ws.on('message', (data) => {
+    const text = data.toString();
+    let message = null;
+
+    try {
+      message = JSON.parse(text);
+    } catch (error) {
+      message = null;
+    }
+
+    const timestamp = Date.now();
+
+    if (!message || typeof message !== 'object') {
+      if (text === 'status' || text === 'request_status') {
+        sendEotmCommand(ws, getEotmStatus());
+      }
+      return;
+    }
+
+    switch (message.type) {
+      case 'map_update':
+        updateEotmClientMapping(ws, {
+          server_ip: message.server_ip || null,
+          character: message.character || null,
+          machine: message.machine || null
+        }, timestamp);
+        notifyEotmAdmins();
+        break;
+      case 'pong':
+        updateEotmClientMapping(ws, {}, timestamp);
+        break;
+      case 'request_status':
+        sendEotmCommand(ws, getEotmStatus());
+        break;
+      case 'fps_updated':
+      case 'fps_limiter_disabled':
+        updateEotmClientMapping(ws, {}, timestamp);
+        break;
+      default:
+        console.warn(`EOTM unknown client message type: ${message.type}`);
+        break;
+    }
+  });
+
+  ws.on('close', () => {
+    cleanupEotmClient(ws);
+  });
+
+  ws.on('error', (error) => {
+    console.error('EOTM client error:', error);
+    cleanupEotmClient(ws);
+  });
+});
+
+// EOTM Assist admin/dashboard connections
+eotmAdminWss.on('connection', (ws) => {
+  eotmAdmins.add(ws);
+  sendEotmCommand(ws, getEotmStatus());
+
+  ws.on('message', (data) => {
+    const text = data.toString();
+    let message = null;
+
+    try {
+      message = JSON.parse(text);
+    } catch (error) {
+      message = null;
+    }
+
+    if (!message || typeof message !== 'object') {
+      if (text === 'status' || text === 'request_status') {
+        sendEotmCommand(ws, getEotmStatus());
+      }
+      return;
+    }
+
+    switch (message.type) {
+      case 'request_status':
+        sendEotmCommand(ws, getEotmStatus());
+        break;
+      case 'close_excess':
+        closeExcessClients(Number(message.keep_count) || 0);
+        break;
+      case 'keep_per_machine':
+        keepPerMachine(Number(message.keep_count) || 0);
+        break;
+      case 'close_machine':
+        if (message.machine) closeMachine(message.machine);
+        break;
+      case 'close_server':
+        if (message.server_ip) closeServer(message.server_ip);
+        break;
+      case 'close_character':
+        if (message.character) closeCharacter(message.character);
+        break;
+      case 'close_all':
+        closeAllEotm();
+        break;
+      case 'set_fps_all':
+        if (Number.isFinite(Number(message.fps))) {
+          setFpsAll(Number(message.fps));
+        }
+        break;
+      case 'disable_fps_limiter_all':
+        disableFpsLimiterAll();
+        break;
+      default:
+        console.warn(`EOTM unknown admin message type: ${message.type}`);
+        break;
+    }
+  });
+
+  ws.on('close', () => {
+    eotmAdmins.delete(ws);
+  });
+
+  ws.on('error', () => {
+    eotmAdmins.delete(ws);
+  });
+});
+
+const eotmPingInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [ws, info] of eotmClients.entries()) {
+    if (now - (info.last_update || 0) > 2 * 60 * 1000) {
+      ws.terminate();
+      cleanupEotmClient(ws);
+      continue;
+    }
+    sendEotmCommand(ws, 'ping');
+  }
+}, 30000);
+
 // Cleanup old clients periodically (every 5 minutes)
 const cleanupInterval = setInterval(async () => {
   const cutoff = Math.floor(Date.now() / 1000) - 3600; // 1 hour
@@ -1062,6 +1467,7 @@ process.on('SIGINT', () => {
   clearInterval(keepAliveInterval);
   clearInterval(reconciliationInterval);
   clearInterval(cleanupInterval);
+  clearInterval(eotmPingInterval);
   process.exit(0);
 });
 
@@ -1070,5 +1476,6 @@ process.on('SIGTERM', () => {
   clearInterval(keepAliveInterval);
   clearInterval(reconciliationInterval);
   clearInterval(cleanupInterval);
+  clearInterval(eotmPingInterval);
   process.exit(0);
 });
