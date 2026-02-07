@@ -1073,6 +1073,34 @@ const eotmMachines = new Map();
 const eotmAdmins = new Set();
 const focusQueues = new Map();
 
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function normalizeCharacter(value) {
+  if (!isNonEmptyString(value)) return null;
+  if (value === 'Unknown') return null;
+  return value;
+}
+
+function normalizeMachine(value) {
+  if (!isNonEmptyString(value)) return null;
+  if (value === 'Unknown') return null;
+  return value;
+}
+
+function normalizeAccount(value) {
+  if (!isNonEmptyString(value)) return null;
+  return value;
+}
+
+function normalizeServerIp(value) {
+  if (!isNonEmptyString(value)) return null;
+  if (value === '0.0.0.0') return null;
+  if (value === 'Unknown IP') return null;
+  return value;
+}
+
 function enqueueFocusForMachine(machine, wsList) {
   if (!machine || !wsList || wsList.length === 0) return;
   const queue = focusQueues.get(machine) || [];
@@ -1464,23 +1492,54 @@ eotmWss.on('connection', (ws, req) => {
 
     switch (message.type) {
       case 'map_update':
-        updateEotmClientMapping(ws, {
-          server_ip: message.server_ip || null,
-          character: message.character || null,
-          account: message.account || null,
-          machine: message.machine || null
-        }, timestamp);
+        {
+          const update = {};
+          if (Object.prototype.hasOwnProperty.call(message, 'server_ip')) {
+            const normalized = normalizeServerIp(message.server_ip);
+            if (normalized) update.server_ip = normalized;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'character')) {
+            const normalized = normalizeCharacter(message.character);
+            if (normalized) update.character = normalized;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'account')) {
+            const normalized = normalizeAccount(message.account);
+            if (normalized) update.account = normalized;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'machine')) {
+            const normalized = normalizeMachine(message.machine);
+            if (normalized) update.machine = normalized;
+          }
+          updateEotmClientMapping(ws, update, timestamp);
+        }
         notifyEotmAdmins();
         break;
       case 'map_leave':
-        updateEotmClientMapping(ws, {
-          server_ip: null,
-          character: message.character || null,
-          account: message.account || null,
-          machine: message.machine || null,
-          last_server_ip: message.last_server_ip || null,
-          leave_reason: message.reason || null
-        }, timestamp);
+        {
+          const update = {
+            server_ip: null
+          };
+          if (Object.prototype.hasOwnProperty.call(message, 'character')) {
+            const normalized = normalizeCharacter(message.character);
+            if (normalized) update.character = normalized;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'account')) {
+            const normalized = normalizeAccount(message.account);
+            if (normalized) update.account = normalized;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'machine')) {
+            const normalized = normalizeMachine(message.machine);
+            if (normalized) update.machine = normalized;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'last_server_ip')) {
+            const normalized = normalizeServerIp(message.last_server_ip);
+            if (normalized) update.last_server_ip = normalized;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, 'reason')) {
+            update.leave_reason = message.reason || null;
+          }
+          updateEotmClientMapping(ws, update, timestamp);
+        }
         notifyEotmAdmins();
         break;
       case 'pong':
