@@ -1587,10 +1587,18 @@ eotmWss.on('connection', (ws, req) => {
       case 'status':
         {
           const update = {};
+          const inEotm = message.in_eotm === true;
+          const outOfEotm = message.in_eotm === false;
           if (Object.prototype.hasOwnProperty.call(message, 'server_ip')) {
             const normalized = normalizeServerIp(message.server_ip);
-            if (normalized) update.server_ip = normalized;
-            if (!normalized && message.in_eotm === false) update.server_ip = null;
+            if (outOfEotm) {
+              update.server_ip = null;
+              if (normalized) update.last_server_ip = normalized;
+            } else if (inEotm && normalized) {
+              update.server_ip = normalized;
+            } else if (!inEotm && !outOfEotm && normalized) {
+              update.server_ip = normalized;
+            }
           }
           if (Object.prototype.hasOwnProperty.call(message, 'character')) {
             const normalized = normalizeCharacter(message.character);
