@@ -1126,6 +1126,7 @@ function getEotmStatus() {
       if (!info) continue;
       instances[serverIp].push({
         character: info.character || 'Unknown',
+        account: info.account || '',
         machine: info.machine || 'Unknown'
       });
     }
@@ -1138,6 +1139,7 @@ function getEotmStatus() {
       if (!info) continue;
       machines[machine].push({
         character: info.character || 'Unknown',
+        account: info.account || '',
         server_ip: info.server_ip || null
       });
     }
@@ -1182,6 +1184,7 @@ function sendEotmCommand(ws, message) {
 function updateEotmClientMapping(ws, update, now) {
   const current = eotmClients.get(ws) || {
     character: null,
+    account: null,
     server_ip: null,
     machine: null,
     last_update: now
@@ -1211,6 +1214,10 @@ function updateEotmClientMapping(ws, update, now) {
 
   if (Object.prototype.hasOwnProperty.call(update, 'character') && update.character) {
     current.character = update.character;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(update, 'account')) {
+    current.account = update.account || null;
   }
 
   current.last_update = now;
@@ -1356,6 +1363,7 @@ eotmWss.on('connection', (ws, req) => {
   const now = Date.now();
   eotmClients.set(ws, {
     character: null,
+    account: null,
     server_ip: null,
     machine: null,
     last_update: now
@@ -1387,6 +1395,7 @@ eotmWss.on('connection', (ws, req) => {
         updateEotmClientMapping(ws, {
           server_ip: message.server_ip || null,
           character: message.character || null,
+          account: message.account || null,
           machine: message.machine || null
         }, timestamp);
         notifyEotmAdmins();
@@ -1395,6 +1404,7 @@ eotmWss.on('connection', (ws, req) => {
         updateEotmClientMapping(ws, {
           server_ip: null,
           character: message.character || null,
+          account: message.account || null,
           machine: message.machine || null
         }, timestamp);
         notifyEotmAdmins();

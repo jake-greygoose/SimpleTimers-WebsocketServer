@@ -196,7 +196,8 @@
         clients.forEach(client => {
           const row = document.createElement('div');
           row.className = 'flex items-center justify-between bg-gray-800 rounded px-2 py-1';
-          row.innerHTML = `<div>${client.character} <span class="text-xs text-gray-400">@ ${client.machine}</span></div>`;
+          const accountLabel = client.account ? ` <span class="text-xs text-gray-400">(${client.account})</span>` : '';
+          row.innerHTML = `<div>${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span></div>`;
 
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
@@ -252,7 +253,8 @@
         clients.forEach(client => {
           const row = document.createElement('div');
           row.className = 'flex items-center justify-between bg-gray-800 rounded px-2 py-1';
-          row.innerHTML = `<div>${client.character} <span class="text-xs text-gray-400">@ ${client.server_ip || 'unknown'}</span></div>`;
+          const accountLabel = client.account ? ` <span class="text-xs text-gray-400">(${client.account})</span>` : '';
+          row.innerHTML = `<div>${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.server_ip || 'unknown'}</span></div>`;
 
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
