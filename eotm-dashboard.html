@@ -61,6 +61,7 @@
           </div>
           <div class="flex gap-2">
             <button id="reconnect-outside-btn" class="btn btn-accent flex-1">Reconnect Outside EOTM</button>
+            <button id="request-status-unknown-btn" class="btn btn-outline flex-1">Request Status (Unknown)</button>
           </div>
           <div class="flex gap-2">
             <button id="disable-fps-btn" class="btn btn-info flex-1">Disable FPS Limiter</button>
@@ -354,6 +355,9 @@
           header.className = 'flex items-center justify-between gap-2';
           header.innerHTML = `<div>${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>${lastServer}${reasonLabel}${reconnectStatus}</div>`;
 
+          const buttonGroup = document.createElement('div');
+          buttonGroup.className = 'flex items-center gap-1';
+
           const reconnectBtn = document.createElement('button');
           reconnectBtn.className = 'btn btn-xs btn-accent';
           reconnectBtn.textContent = 'Reconnect';
@@ -372,7 +376,22 @@
             });
           });
 
-          header.appendChild(reconnectBtn);
+          const requestBtn = document.createElement('button');
+          requestBtn.className = 'btn btn-xs';
+          requestBtn.textContent = 'Request Update';
+          requestBtn.addEventListener('click', () => {
+            setButtonPending(requestBtn, `request-${client.machine}-${client.character}-${client.account || ''}`, 1200);
+            sendMessage({
+              type: 'request_status_client',
+              character: client.character,
+              machine: client.machine,
+              account: client.account || null
+            });
+          });
+
+          buttonGroup.appendChild(requestBtn);
+          buttonGroup.appendChild(reconnectBtn);
+          header.appendChild(buttonGroup);
           container.appendChild(header);
           outsideList.appendChild(container);
         });
@@ -429,6 +448,11 @@
     document.getElementById('reconnect-outside-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'reconnect-outside', 1200);
       sendMessage({ type: 'reconnect_all_outside' });
+    });
+
+    document.getElementById('request-status-unknown-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'request-status-unknown', 1200);
+      sendMessage({ type: 'request_status_unknown' });
     });
 
     document.getElementById('close-machine-btn').addEventListener('click', () => {

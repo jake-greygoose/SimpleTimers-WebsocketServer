@@ -1072,6 +1072,7 @@ const eotmInstances = new Map();
 const eotmMachines = new Map();
 const eotmAdmins = new Set();
 const focusQueues = new Map();
+const STATUS_REQUEST_COOLDOWN_MS = 30000;
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -1183,7 +1184,8 @@ function getEotmStatus() {
         last_server_ip: info.last_server_ip || null,
         leave_reason: info.leave_reason || null,
         reconnect_status: info.reconnect_status || null,
-        reconnect_reason: info.reconnect_reason || null
+        reconnect_reason: info.reconnect_reason || null,
+        needs_status: !info.server_ip || !info.character || !info.machine
       });
     }
   }
@@ -1235,6 +1237,7 @@ function updateEotmClientMapping(ws, update, now) {
     leave_reason: null,
     reconnect_status: null,
     reconnect_reason: null,
+    last_status_request: 0,
     last_update: now
   };
 
@@ -1422,6 +1425,41 @@ function focusAll() {
   console.log('EOTM focus_all queued');
 }
 
+function requestStatusMatching(predicate) {
+  let count = 0;
+  const now = Date.now();
+  for (const [ws, info] of eotmClients.entries()) {
+    if (!predicate(info)) continue;
+    if (now - (info.last_status_request || 0) < STATUS_REQUEST_COOLDOWN_MS) continue;
+    info.last_status_request = now;
+    eotmClients.set(ws, info);
+    sendEotmCommand(ws, { type: 'request_status' });
+    count += 1;
+  }
+  console.log(`EOTM request_status issued to ${count} client(s)`);
+}
+
+function requestStatusClient(target) {
+  requestStatusMatching((info) => {
+    if (!info) return false;
+    if (target.machine && info.machine !== target.machine) return false;
+    if (target.character && info.character !== target.character) return false;
+    if (Object.prototype.hasOwnProperty.call(target, 'account')) {
+      if (target.account && info.account !== target.account) return false;
+      if (!target.account && info.account) return false;
+    }
+    return true;
+  });
+}
+
+function requestStatusMachine(machine) {
+  requestStatusMatching((info) => info.machine === machine);
+}
+
+function requestStatusUnknown() {
+  requestStatusMatching((info) => !info.server_ip || !info.character || !info.machine);
+}
+
 function reconnectMatching(predicate) {
   let count = 0;
   for (const [ws, info] of eotmClients.entries()) {
@@ -1466,6 +1504,7 @@ eotmWss.on('connection', (ws, req) => {
     leave_reason: null,
     reconnect_status: null,
     reconnect_reason: null,
+    last_status_request: 0,
     last_update: now
   });
 
@@ -1668,6 +1707,19 @@ eotmAdminWss.on('connection', (ws) => {
       case 'reconnect_all_outside':
         reconnectAllOutside();
         break;
+      case 'request_status_client':
+        requestStatusClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        });
+        break;
+      case 'request_status_machine':
+        if (message.machine) requestStatusMachine(message.machine);
+        break;
+      case 'request_status_unknown':
+        requestStatusUnknown();
+        break;
       default:
         console.warn(`EOTM unknown admin message type: ${message.type}`);
         break;
@@ -1690,6 +1742,13 @@ const eotmPingInterval = setInterval(() => {
       ws.terminate();
       cleanupEotmClient(ws);
       continue;
+    }
+    if (!info.server_ip || !info.character || !info.machine) {
+      if (now - (info.last_status_request || 0) >= STATUS_REQUEST_COOLDOWN_MS) {
+        info.last_status_request = now;
+        eotmClients.set(ws, info);
+        sendEotmCommand(ws, { type: 'request_status' });
+      }
     }
     sendEotmCommand(ws, 'ping');
   }
