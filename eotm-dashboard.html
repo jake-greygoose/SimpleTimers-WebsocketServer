@@ -122,6 +122,10 @@
   <script>
     let ws;
     let wsUrl = buildDefaultWsUrl();
+    let reconnectTimer = null;
+    let statusTimer = null;
+    let reconnectAttempts = 0;
+    const pendingButtons = new Set();
 
     const connectionStatus = document.getElementById('connection-status');
     const totalClients = document.getElementById('total-clients');
@@ -148,11 +152,13 @@
 
       ws.onopen = () => {
         setStatusBadge(true);
+        reconnectAttempts = 0;
         sendMessage({ type: 'request_status' });
       };
 
       ws.onclose = () => {
         setStatusBadge(false);
+        scheduleReconnect();
       };
 
       ws.onerror = () => {
@@ -169,8 +175,54 @@
 
         if (message.type === 'status') {
           renderStatus(message);
+          clearPendingButtons();
         }
       };
+    }
+
+    function scheduleReconnect() {
+      if (reconnectTimer) return;
+      const delay = Math.min(10000, 1000 * Math.pow(1.6, reconnectAttempts));
+      reconnectAttempts += 1;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delay);
+    }
+
+    function startStatusPolling() {
+      if (statusTimer) return;
+      statusTimer = setInterval(() => {
+        sendMessage({ type: 'request_status' });
+      }, 5000);
+    }
+
+    function stopStatusPolling() {
+      if (!statusTimer) return;
+      clearInterval(statusTimer);
+      statusTimer = null;
+    }
+
+    function setButtonPending(button, key, duration = 800) {
+      if (!button) return;
+      const pendingKey = key || button.id || button.textContent;
+      if (pendingButtons.has(pendingKey)) return;
+      pendingButtons.add(pendingKey);
+      button.disabled = true;
+      button.classList.add('loading');
+      setTimeout(() => {
+        button.disabled = false;
+        button.classList.remove('loading');
+        pendingButtons.delete(pendingKey);
+      }, duration);
+    }
+
+    function clearPendingButtons() {
+      document.querySelectorAll('button.loading').forEach((button) => {
+        button.classList.remove('loading');
+        button.disabled = false;
+      });
+      pendingButtons.clear();
     }
 
     function sendMessage(message) {
@@ -305,12 +357,20 @@
           const reconnectBtn = document.createElement('button');
           reconnectBtn.className = 'btn btn-xs btn-accent';
           reconnectBtn.textContent = 'Reconnect';
-          reconnectBtn.addEventListener('click', () => sendMessage({
-            type: 'reconnect_client',
-            character: client.character,
-            machine: client.machine,
-            account: client.account || null
-          }));
+          const shouldDisable = client.reconnect_status === 'reconnect_started';
+          if (shouldDisable) {
+            reconnectBtn.disabled = true;
+            reconnectBtn.classList.add('loading');
+          }
+          reconnectBtn.addEventListener('click', () => {
+            setButtonPending(reconnectBtn, `reconnect-${client.machine}-${client.character}-${client.account || ''}`, 1500);
+            sendMessage({
+              type: 'reconnect_client',
+              character: client.character,
+              machine: client.machine,
+              account: client.account || null
+            });
+          });
 
           header.appendChild(reconnectBtn);
           container.appendChild(header);
@@ -319,41 +379,55 @@
       }
     }
 
-    document.getElementById('reconnect-btn').addEventListener('click', () => connect());
-    document.getElementById('refresh-btn').addEventListener('click', () => sendMessage({ type: 'request_status' }));
+    document.getElementById('reconnect-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'reconnect-dashboard', 800);
+      connect();
+    });
+    document.getElementById('refresh-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'refresh-status', 500);
+      sendMessage({ type: 'request_status' });
+    });
 
-    document.getElementById('close-excess-btn').addEventListener('click', () => {
+    document.getElementById('close-excess-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'close-excess', 800);
       const keepCount = Number(document.getElementById('close-excess-count').value || 0);
       sendMessage({ type: 'close_excess', keep_count: keepCount });
     });
 
-    document.getElementById('keep-per-machine-btn').addEventListener('click', () => {
+    document.getElementById('keep-per-machine-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'keep-per-machine', 800);
       const keepCount = Number(document.getElementById('keep-per-machine-count').value || 0);
       sendMessage({ type: 'keep_per_machine', keep_count: keepCount });
     });
 
-    document.getElementById('set-fps-btn').addEventListener('click', () => {
+    document.getElementById('set-fps-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'set-fps-all', 800);
       const fps = Number(document.getElementById('set-fps-value').value || 15);
       sendMessage({ type: 'set_fps_all', fps });
     });
 
-    document.getElementById('disable-fps-btn').addEventListener('click', () => {
+    document.getElementById('disable-fps-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'disable-fps', 800);
       sendMessage({ type: 'disable_fps_limiter_all' });
     });
 
-    document.getElementById('close-all-btn').addEventListener('click', () => {
+    document.getElementById('close-all-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'close-all', 800);
       sendMessage({ type: 'close_all' });
     });
 
-    document.getElementById('minimize-all-btn').addEventListener('click', () => {
+    document.getElementById('minimize-all-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'minimize-all', 800);
       sendMessage({ type: 'minimize_all' });
     });
 
-    document.getElementById('focus-all-btn').addEventListener('click', () => {
+    document.getElementById('focus-all-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'focus-all', 800);
       sendMessage({ type: 'focus_all' });
     });
 
-    document.getElementById('reconnect-outside-btn').addEventListener('click', () => {
+    document.getElementById('reconnect-outside-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'reconnect-outside', 1200);
       sendMessage({ type: 'reconnect_all_outside' });
     });
 
@@ -386,6 +460,7 @@
     });
 
     connect();
+    startStatusPolling();
   </script>
 </body>
 </html>
