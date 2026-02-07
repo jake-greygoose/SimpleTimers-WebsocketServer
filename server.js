@@ -1071,6 +1071,29 @@ const eotmClients = new Map();
 const eotmInstances = new Map();
 const eotmMachines = new Map();
 const eotmAdmins = new Set();
+const focusQueues = new Map();
+
+function enqueueFocusForMachine(machine, wsList) {
+  if (!machine || !wsList || wsList.length === 0) return;
+  const queue = focusQueues.get(machine) || [];
+  wsList.forEach((ws) => queue.push(ws));
+  focusQueues.set(machine, queue);
+
+  if (queue._timer) return;
+
+  queue._timer = setInterval(() => {
+    const currentQueue = focusQueues.get(machine);
+    if (!currentQueue || currentQueue.length === 0) {
+      if (queue._timer) clearInterval(queue._timer);
+      focusQueues.delete(machine);
+      return;
+    }
+    const ws = currentQueue.shift();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      sendEotmCommand(ws, 'bring_to_front');
+    }
+  }, 1000);
+}
 
 function addToGroup(map, key, ws) {
   if (!key) return;
@@ -1286,6 +1309,48 @@ function disableFpsLimiterAll() {
   console.log('EOTM disable_fps_limiter_all');
 }
 
+function minimizeAll() {
+  for (const ws of eotmClients.keys()) {
+    sendEotmCommand(ws, 'minimize');
+  }
+  console.log('EOTM minimize_all');
+}
+
+function minimizeMachine(machine) {
+  const wsSet = eotmMachines.get(machine);
+  if (!wsSet) return;
+  for (const ws of wsSet) {
+    sendEotmCommand(ws, 'minimize');
+  }
+  console.log(`EOTM minimize_machine: ${machine}`);
+}
+
+function focusMachine(machine) {
+  const wsSet = eotmMachines.get(machine);
+  if (!wsSet) return;
+  const wsList = Array.from(wsSet);
+  wsList.sort((a, b) => {
+    const aInfo = eotmClients.get(a);
+    const bInfo = eotmClients.get(b);
+    return (bInfo?.last_update || 0) - (aInfo?.last_update || 0);
+  });
+  enqueueFocusForMachine(machine, wsList);
+  console.log(`EOTM focus_machine queued: ${machine}`);
+}
+
+function focusAll() {
+  for (const [machine, wsSet] of eotmMachines.entries()) {
+    const wsList = Array.from(wsSet);
+    wsList.sort((a, b) => {
+      const aInfo = eotmClients.get(a);
+      const bInfo = eotmClients.get(b);
+      return (bInfo?.last_update || 0) - (aInfo?.last_update || 0);
+    });
+    enqueueFocusForMachine(machine, wsList);
+  }
+  console.log('EOTM focus_all queued');
+}
+
 // EOTM Assist client connections (game addon)
 eotmWss.on('connection', (ws, req) => {
   const now = Date.now();
@@ -1334,6 +1399,8 @@ eotmWss.on('connection', (ws, req) => {
         break;
       case 'fps_updated':
       case 'fps_limiter_disabled':
+      case 'minimized':
+      case 'focused':
         updateEotmClientMapping(ws, {}, timestamp);
         break;
       default:
@@ -1403,6 +1470,18 @@ eotmAdminWss.on('connection', (ws) => {
         break;
       case 'disable_fps_limiter_all':
         disableFpsLimiterAll();
+        break;
+      case 'minimize_all':
+        minimizeAll();
+        break;
+      case 'minimize_machine':
+        if (message.machine) minimizeMachine(message.machine);
+        break;
+      case 'focus_machine':
+        if (message.machine) focusMachine(message.machine);
+        break;
+      case 'focus_all':
+        focusAll();
         break;
       default:
         console.warn(`EOTM unknown admin message type: ${message.type}`);

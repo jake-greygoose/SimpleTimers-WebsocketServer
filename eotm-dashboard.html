@@ -56,6 +56,10 @@
             <button id="set-fps-btn" class="btn btn-info">Set FPS All</button>
           </div>
           <div class="flex gap-2">
+            <button id="minimize-all-btn" class="btn btn-secondary flex-1">Minimize All</button>
+            <button id="focus-all-btn" class="btn btn-secondary flex-1">Focus All (1/sec per machine)</button>
+          </div>
+          <div class="flex gap-2">
             <button id="disable-fps-btn" class="btn btn-info flex-1">Disable FPS Limiter</button>
             <button id="close-all-btn" class="btn btn-error flex-1">Close All</button>
           </div>
@@ -219,12 +223,28 @@
         header.className = 'flex items-center justify-between gap-2 mb-2';
         header.innerHTML = `<div><span class="font-semibold">${machine}</span> <span class="text-xs text-gray-300">(${clients.length})</span></div>`;
 
+        const actionGroup = document.createElement('div');
+        actionGroup.className = 'flex items-center gap-1';
+
+        const focusBtn = document.createElement('button');
+        focusBtn.className = 'btn btn-xs btn-secondary';
+        focusBtn.textContent = 'Focus';
+        focusBtn.addEventListener('click', () => sendMessage({ type: 'focus_machine', machine }));
+
+        const minimizeBtn = document.createElement('button');
+        minimizeBtn.className = 'btn btn-xs btn-secondary';
+        minimizeBtn.textContent = 'Minimize';
+        minimizeBtn.addEventListener('click', () => sendMessage({ type: 'minimize_machine', machine }));
+
         const closeBtn = document.createElement('button');
         closeBtn.className = 'btn btn-xs btn-warning';
-        closeBtn.textContent = 'Close Machine';
+        closeBtn.textContent = 'Close';
         closeBtn.addEventListener('click', () => sendMessage({ type: 'close_machine', machine }));
 
-        header.appendChild(closeBtn);
+        actionGroup.appendChild(focusBtn);
+        actionGroup.appendChild(minimizeBtn);
+        actionGroup.appendChild(closeBtn);
+        header.appendChild(actionGroup);
         container.appendChild(header);
 
         const list = document.createElement('div');
@@ -275,6 +295,14 @@
 
     document.getElementById('close-all-btn').addEventListener('click', () => {
       sendMessage({ type: 'close_all' });
+    });
+
+    document.getElementById('minimize-all-btn').addEventListener('click', () => {
+      sendMessage({ type: 'minimize_all' });
+    });
+
+    document.getElementById('focus-all-btn').addEventListener('click', () => {
+      sendMessage({ type: 'focus_all' });
     });
 
     document.getElementById('close-machine-btn').addEventListener('click', () => {
