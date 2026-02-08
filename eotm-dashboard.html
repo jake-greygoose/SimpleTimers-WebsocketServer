@@ -70,8 +70,7 @@
   <div class="max-w-6xl mx-auto">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
       <div>
-        <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">EOTM Control Deck</h1>
-        <p class="text-sm text-slate-300">Locate live map instances, focus clients, and manage multi‑PC account coverage.</p>
+        <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">EOTM Assist Dashboard</h1>
       </div>
       <div class="flex items-center gap-2 text-xs text-slate-300">
         <span id="connection-dot" class="inline-flex h-2 w-2 rounded-full bg-rose-500"></span>
@@ -108,26 +107,35 @@
         </div>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-        <div class="flex gap-2">
-          <input id="close-excess-count" type="number" min="0" value="2" class="input input-bordered flex-1 bg-gray-800" placeholder="Keep per instance">
-          <button id="close-excess-btn" class="btn btn-warning action-btn">
-            <i class="fa-solid fa-scissors"></i>
-            Close Excess
-          </button>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs text-slate-400">Keep per instance</label>
+          <div class="flex gap-2 items-center">
+            <input id="close-excess-count" type="number" min="0" value="2" class="input input-bordered w-24 bg-gray-800">
+            <button id="close-excess-btn" class="btn btn-warning action-btn flex-1">
+              <i class="fa-solid fa-scissors"></i>
+              Close Excess
+            </button>
+          </div>
         </div>
-        <div class="flex gap-2">
-          <input id="keep-per-machine-count" type="number" min="0" value="5" class="input input-bordered flex-1 bg-gray-800" placeholder="Keep per machine">
-          <button id="keep-per-machine-btn" class="btn btn-warning action-btn">
-            <i class="fa-solid fa-network-wired"></i>
-            Keep Per Machine
-          </button>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs text-slate-400">Keep per machine</label>
+          <div class="flex gap-2 items-center">
+            <input id="keep-per-machine-count" type="number" min="0" value="5" class="input input-bordered w-24 bg-gray-800">
+            <button id="keep-per-machine-btn" class="btn btn-warning action-btn flex-1">
+              <i class="fa-solid fa-network-wired"></i>
+              Keep Per Machine
+            </button>
+          </div>
         </div>
-        <div class="flex gap-2">
-          <input id="set-fps-value" type="number" min="1" max="200" value="15" class="input input-bordered flex-1 bg-gray-800" placeholder="FPS">
-          <button id="set-fps-btn" class="btn btn-info action-btn">
-            <i class="fa-solid fa-gauge-high"></i>
-            Set FPS All
-          </button>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs text-slate-400">Target FPS</label>
+          <div class="flex gap-2 items-center">
+            <input id="set-fps-value" type="number" min="1" max="200" value="15" class="input input-bordered w-24 bg-gray-800">
+            <button id="set-fps-btn" class="btn btn-info action-btn flex-1">
+              <i class="fa-solid fa-gauge-high"></i>
+              Set FPS All
+            </button>
+          </div>
         </div>
         <div class="flex gap-2">
           <button id="minimize-all-btn" class="btn btn-secondary action-btn flex-1">
@@ -165,8 +173,7 @@
     <div class="panel p-4">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
         <div>
-          <h2 class="text-lg font-semibold">Live Discovery</h2>
-          <p class="text-xs text-slate-400">Switch between instance and machine views to target accounts fast.</p>
+          <h2 class="text-lg font-semibold">Live View</h2>
         </div>
         <div class="flex items-center gap-2">
           <div class="join">
