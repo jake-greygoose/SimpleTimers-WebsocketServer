@@ -114,10 +114,9 @@
           <option value="instance">Instance IP</option>
           <option value="machine">Machine</option>
         </select>
-        <div class="flex-1 min-w-[160px]">
-          <input id="scope-value" type="text" class="input input-bordered input-sm bg-gray-800 w-full" placeholder="Instance IP or Machine (optional)" list="scope-values">
-          <datalist id="scope-values"></datalist>
-        </div>
+        <select id="scope-value" class="select select-bordered select-sm bg-gray-800 flex-1 min-w-[160px]">
+          <option value="">Select scope value</option>
+        </select>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         <div class="flex flex-col gap-2">
@@ -230,7 +229,6 @@
     const instanceSummary = document.getElementById('instance-summary');
     const scopeTypeSelect = document.getElementById('scope-type');
     const scopeValueInput = document.getElementById('scope-value');
-    const scopeValuesDatalist = document.getElementById('scope-values');
 
     function buildDefaultWsUrl() {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -635,11 +633,16 @@
         : scopeTypeSelect.value === 'machine'
           ? Object.keys(lastStatus.machines || {})
           : [];
-      scopeValuesDatalist.innerHTML = '';
+      scopeValueInput.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = values.length ? 'Select scope value' : 'No values';
+      scopeValueInput.appendChild(placeholder);
       values.forEach((value) => {
         const option = document.createElement('option');
         option.value = value;
-        scopeValuesDatalist.appendChild(option);
+        option.textContent = value;
+        scopeValueInput.appendChild(option);
       });
     }
 
@@ -667,13 +670,12 @@
     machinesTab.addEventListener('click', () => setActiveList('machines'));
 
     scopeTypeSelect.addEventListener('change', () => {
-      scopeValueInput.value = '';
       updateScopeSuggestions();
     });
 
     function getScopePayload() {
       const scopeType = scopeTypeSelect.value;
-      const scopeValue = scopeValueInput.value.trim();
+      const scopeValue = scopeValueInput.value;
       if (scopeType === 'all' || scopeValue.length === 0) {
         return { scope_type: 'all', scope_value: null };
       }
