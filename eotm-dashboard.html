@@ -636,7 +636,7 @@
       scopeValueInput.innerHTML = '';
       const placeholder = document.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = values.length ? 'Select scope value' : 'No values';
+      placeholder.textContent = values.length ? 'Select scope value' : 'No values available';
       scopeValueInput.appendChild(placeholder);
       values.forEach((value) => {
         const option = document.createElement('option');
@@ -644,6 +644,15 @@
         option.textContent = value;
         scopeValueInput.appendChild(option);
       });
+      if (values.length) {
+        scopeValueInput.disabled = false;
+        scopeValueInput.classList.remove('opacity-60');
+        scopeValueInput.value = values[0];
+      } else {
+        scopeValueInput.disabled = true;
+        scopeValueInput.classList.add('opacity-60');
+        scopeValueInput.value = '';
+      }
     }
 
     function setActiveList(tab) {
