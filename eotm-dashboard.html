@@ -114,7 +114,10 @@
           <option value="instance">Instance IP</option>
           <option value="machine">Machine</option>
         </select>
-        <input id="scope-value" type="text" class="input input-bordered input-sm bg-gray-800 flex-1 min-w-[160px]" placeholder="Instance IP or Machine (optional)">
+        <div class="flex-1 min-w-[160px]">
+          <input id="scope-value" type="text" class="input input-bordered input-sm bg-gray-800 w-full" placeholder="Instance IP or Machine (optional)" list="scope-values">
+          <datalist id="scope-values"></datalist>
+        </div>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         <div class="flex flex-col gap-2">
@@ -213,6 +216,7 @@
     let statusTimer = null;
     let reconnectAttempts = 0;
     const pendingButtons = new Set();
+    let lastStatus = { instances: {}, machines: {}, outside: [] };
 
     const connectionDot = document.getElementById('connection-dot');
     const connectionLabel = document.getElementById('connection-label');
@@ -226,6 +230,7 @@
     const instanceSummary = document.getElementById('instance-summary');
     const scopeTypeSelect = document.getElementById('scope-type');
     const scopeValueInput = document.getElementById('scope-value');
+    const scopeValuesDatalist = document.getElementById('scope-values');
 
     function buildDefaultWsUrl() {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -323,6 +328,7 @@
     }
 
     function renderStatus(status) {
+      lastStatus = status || lastStatus;
       const instances = status.instances || {};
       const machines = status.machines || {};
       const outside = status.outside || [];
@@ -338,6 +344,8 @@
       } else {
         instanceSummary.classList.add('hidden');
       }
+
+      updateScopeSuggestions();
 
       instancesList.innerHTML = '';
       Object.entries(instances).forEach(([serverIp, clients]) => {
@@ -621,6 +629,20 @@
     const machinesTab = document.getElementById('machines-tab');
     const listHint = document.getElementById('list-hint');
 
+    function updateScopeSuggestions() {
+      const values = scopeTypeSelect.value === 'instance'
+        ? Object.keys(lastStatus.instances || {})
+        : scopeTypeSelect.value === 'machine'
+          ? Object.keys(lastStatus.machines || {})
+          : [];
+      scopeValuesDatalist.innerHTML = '';
+      values.forEach((value) => {
+        const option = document.createElement('option');
+        option.value = value;
+        scopeValuesDatalist.appendChild(option);
+      });
+    }
+
     function setActiveList(tab) {
       if (tab === 'instances') {
         instancesTab.classList.add('btn-primary');
@@ -643,6 +665,11 @@
 
     instancesTab.addEventListener('click', () => setActiveList('instances'));
     machinesTab.addEventListener('click', () => setActiveList('machines'));
+
+    scopeTypeSelect.addEventListener('change', () => {
+      scopeValueInput.value = '';
+      updateScopeSuggestions();
+    });
 
     function getScopePayload() {
       const scopeType = scopeTypeSelect.value;
