@@ -208,6 +208,19 @@
     </div>
   </div>
 
+  <div id="sqjoin-modal" class="modal">
+    <div class="modal-box bg-gray-800">
+      <h3 class="font-semibold text-lg mb-2">Send Squad Join</h3>
+      <p class="text-sm text-slate-300 mb-4">Enter the account name to join (e.g., `Account.1234`).</p>
+      <input id="sqjoin-name" type="text" class="input input-bordered w-full bg-gray-700" placeholder="Account.1234">
+      <div class="modal-action">
+        <button id="sqjoin-send-btn" class="btn btn-primary">Send</button>
+        <button id="sqjoin-cancel-btn" class="btn">Cancel</button>
+      </div>
+    </div>
+    <div class="modal-backdrop" id="sqjoin-backdrop"></div>
+  </div>
+
   <script>
     let ws;
     let wsUrl = buildDefaultWsUrl();
@@ -229,6 +242,12 @@
     const instanceSummary = document.getElementById('instance-summary');
     const scopeTypeSelect = document.getElementById('scope-type');
     const scopeValueInput = document.getElementById('scope-value');
+    const sqjoinModal = document.getElementById('sqjoin-modal');
+    const sqjoinNameInput = document.getElementById('sqjoin-name');
+    const sqjoinSendBtn = document.getElementById('sqjoin-send-btn');
+    const sqjoinCancelBtn = document.getElementById('sqjoin-cancel-btn');
+    const sqjoinBackdrop = document.getElementById('sqjoin-backdrop');
+    let sqjoinTarget = null;
 
     function buildDefaultWsUrl() {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -325,6 +344,18 @@
       ws.send(JSON.stringify(message));
     }
 
+    function openSqjoinModal(target) {
+      sqjoinTarget = target;
+      sqjoinNameInput.value = '';
+      sqjoinModal.classList.add('modal-open');
+      sqjoinNameInput.focus();
+    }
+
+    function closeSqjoinModal() {
+      sqjoinModal.classList.remove('modal-open');
+      sqjoinTarget = null;
+    }
+
     function renderStatus(status) {
       lastStatus = status || lastStatus;
       const instances = status.instances || {};
@@ -398,6 +429,13 @@
             sendMessage({ type: 'disable_fps_client', character: client.character, machine: client.machine, account: client.account || null });
           });
 
+          const sqjoinBtn = document.createElement('button');
+          sqjoinBtn.className = 'btn btn-xs btn-accent';
+          sqjoinBtn.textContent = 'Send Join';
+          sqjoinBtn.addEventListener('click', () => {
+            openSqjoinModal({ character: client.character, machine: client.machine, account: client.account || null });
+          });
+
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
           closeChar.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
@@ -409,6 +447,7 @@
           actions.appendChild(focusBtn);
           actions.appendChild(minimizeBtn);
           actions.appendChild(fpsBtn);
+          actions.appendChild(sqjoinBtn);
           actions.appendChild(closeChar);
           row.appendChild(label);
           row.appendChild(actions);
@@ -492,6 +531,13 @@
             sendMessage({ type: 'disable_fps_client', character: client.character, machine: client.machine, account: client.account || null });
           });
 
+          const sqjoinBtn = document.createElement('button');
+          sqjoinBtn.className = 'btn btn-xs btn-accent';
+          sqjoinBtn.textContent = 'Send Join';
+          sqjoinBtn.addEventListener('click', () => {
+            openSqjoinModal({ character: client.character, machine: client.machine, account: client.account || null });
+          });
+
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
           closeChar.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
@@ -503,6 +549,7 @@
           actions.appendChild(focusBtn);
           actions.appendChild(minimizeBtn);
           actions.appendChild(fpsBtn);
+          actions.appendChild(sqjoinBtn);
           actions.appendChild(closeChar);
           row.appendChild(label);
           row.appendChild(actions);
@@ -566,6 +613,13 @@
             sendMessage({ type: 'disable_fps_client', character: client.character, machine: client.machine, account: client.account || null });
           });
 
+          const sqjoinBtn = document.createElement('button');
+          sqjoinBtn.className = 'btn btn-xs btn-accent';
+          sqjoinBtn.textContent = 'Send Join';
+          sqjoinBtn.addEventListener('click', () => {
+            openSqjoinModal({ character: client.character, machine: client.machine, account: client.account || null });
+          });
+
           const reconnectBtn = document.createElement('button');
           reconnectBtn.className = 'btn btn-xs btn-accent';
           reconnectBtn.textContent = 'Reconnect';
@@ -609,6 +663,7 @@
           buttonGroup.appendChild(focusBtn);
           buttonGroup.appendChild(minimizeBtn);
           buttonGroup.appendChild(fpsBtn);
+          buttonGroup.appendChild(sqjoinBtn);
           buttonGroup.appendChild(reconnectBtn);
           buttonGroup.appendChild(closeBtn);
           header.appendChild(buttonGroup);
@@ -680,6 +735,28 @@
 
     scopeTypeSelect.addEventListener('change', () => {
       updateScopeSuggestions();
+    });
+
+    sqjoinCancelBtn.addEventListener('click', () => {
+      closeSqjoinModal();
+    });
+
+    sqjoinBackdrop.addEventListener('click', () => {
+      closeSqjoinModal();
+    });
+
+    sqjoinSendBtn.addEventListener('click', () => {
+      const name = sqjoinNameInput.value.trim();
+      if (!name || !sqjoinTarget) return;
+      setButtonPending(sqjoinSendBtn, `sqjoin-${sqjoinTarget.machine}-${sqjoinTarget.character}-${sqjoinTarget.account || ''}`, 1200);
+      sendMessage({
+        type: 'sqjoin_client',
+        name,
+        character: sqjoinTarget.character,
+        machine: sqjoinTarget.machine,
+        account: sqjoinTarget.account || null
+      });
+      closeSqjoinModal();
     });
 
     function getScopePayload() {

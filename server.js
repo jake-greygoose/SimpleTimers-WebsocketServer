@@ -1629,6 +1629,14 @@ function closeClient(target) {
   }
 }
 
+function sqjoinClient(target, name) {
+  if (!name) return;
+  const found = sendCommandToClient(target, { type: 'sqjoin', name });
+  if (found) {
+    console.log(`EOTM sqjoin_client issued: ${name}`);
+  }
+}
+
 function reconnectMatching(predicate) {
   let count = 0;
   for (const [ws, info] of eotmClients.entries()) {
@@ -1950,6 +1958,13 @@ eotmAdminWss.on('connection', (ws) => {
           character: message.character || null,
           account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
         });
+        break;
+      case 'sqjoin_client':
+        sqjoinClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        }, message.name);
         break;
       default:
         console.warn(`EOTM unknown admin message type: ${message.type}`);
