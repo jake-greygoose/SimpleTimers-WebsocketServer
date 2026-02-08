@@ -80,22 +80,19 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div class="card bg-gray-800 p-4">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-semibold">Instances</h2>
+    <div class="card bg-gray-800 p-4">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+        <div class="tabs tabs-boxed">
+          <button id="instances-tab" class="tab tab-active">Instances</button>
+          <button id="machines-tab" class="tab">Machines</button>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="list-hint" class="text-xs text-gray-400">Instances grouped by server IP</span>
           <button id="refresh-btn" class="btn btn-sm">Refresh</button>
         </div>
-        <div id="instances-list" class="space-y-3"></div>
       </div>
-
-      <div class="card bg-gray-800 p-4">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-semibold">Machines</h2>
-          <span class="text-xs text-gray-400">Click actions for quick close</span>
-        </div>
-        <div id="machines-list" class="space-y-3"></div>
-      </div>
+      <div id="instances-list" class="space-y-3"></div>
+      <div id="machines-list" class="space-y-3 hidden"></div>
     </div>
 
     <div class="card bg-gray-800 p-4 mt-6">
@@ -254,7 +251,7 @@
           label.innerHTML = `${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>`;
 
           const actions = document.createElement('div');
-          actions.className = 'flex items-center gap-1';
+          actions.className = 'flex items-center gap-1 flex-wrap justify-end';
 
           const focusBtn = document.createElement('button');
           focusBtn.className = 'btn btn-xs';
@@ -348,7 +345,7 @@
           label.innerHTML = `${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.server_ip || 'unknown'}</span>`;
 
           const actions = document.createElement('div');
-          actions.className = 'flex items-center gap-1';
+          actions.className = 'flex items-center gap-1 flex-wrap justify-end';
 
           const focusBtn = document.createElement('button');
           focusBtn.className = 'btn btn-xs';
@@ -503,6 +500,29 @@
       setButtonPending(event.currentTarget, 'refresh-status', 500);
       sendMessage({ type: 'request_status' });
     });
+
+    const instancesTab = document.getElementById('instances-tab');
+    const machinesTab = document.getElementById('machines-tab');
+    const listHint = document.getElementById('list-hint');
+
+    function setActiveList(tab) {
+      if (tab === 'instances') {
+        instancesTab.classList.add('tab-active');
+        machinesTab.classList.remove('tab-active');
+        instancesList.classList.remove('hidden');
+        machinesList.classList.add('hidden');
+        listHint.textContent = 'Instances grouped by server IP';
+      } else {
+        machinesTab.classList.add('tab-active');
+        instancesTab.classList.remove('tab-active');
+        machinesList.classList.remove('hidden');
+        instancesList.classList.add('hidden');
+        listHint.textContent = 'Machines grouped by host';
+      }
+    }
+
+    instancesTab.addEventListener('click', () => setActiveList('instances'));
+    machinesTab.addEventListener('click', () => setActiveList('machines'));
 
     document.getElementById('close-excess-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'close-excess', 800);
