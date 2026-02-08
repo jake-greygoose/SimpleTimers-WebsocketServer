@@ -69,22 +69,9 @@
           </div>
         </div>
       </div>
-
       <div class="card bg-gray-800 p-4">
-        <h2 class="text-lg font-semibold mb-3">Targeted Actions</h2>
+        <h2 class="text-lg font-semibold mb-3">Connection</h2>
         <div class="flex flex-col gap-3">
-          <div class="flex gap-2">
-            <input id="close-machine-name" type="text" class="input input-bordered flex-1 bg-gray-700" placeholder="Machine name">
-            <button id="close-machine-btn" class="btn btn-warning">Close Machine</button>
-          </div>
-          <div class="flex gap-2">
-            <input id="close-server-ip" type="text" class="input input-bordered flex-1 bg-gray-700" placeholder="Server IP">
-            <button id="close-server-btn" class="btn btn-warning">Close Server</button>
-          </div>
-          <div class="flex gap-2">
-            <input id="close-character-name" type="text" class="input input-bordered flex-1 bg-gray-700" placeholder="Character name">
-            <button id="close-character-btn" class="btn btn-warning">Close Character</button>
-          </div>
           <div class="flex gap-2">
             <input id="ws-url" type="text" class="input input-bordered flex-1 bg-gray-700" placeholder="Override WebSocket URL">
             <button id="apply-ws-url" class="btn">Apply</button>
@@ -261,15 +248,52 @@
         list.className = 'space-y-1 text-sm';
         clients.forEach(client => {
           const row = document.createElement('div');
-          row.className = 'flex items-center justify-between bg-gray-800 rounded px-2 py-1';
+          row.className = 'flex items-center justify-between bg-gray-800 rounded px-2 py-1 gap-2';
           const accountLabel = client.account ? ` <span class="text-xs text-gray-400">(${client.account})</span>` : '';
-          row.innerHTML = `<div>${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span></div>`;
+          const label = document.createElement('div');
+          label.innerHTML = `${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>`;
+
+          const actions = document.createElement('div');
+          actions.className = 'flex items-center gap-1';
+
+          const focusBtn = document.createElement('button');
+          focusBtn.className = 'btn btn-xs';
+          focusBtn.textContent = 'Focus';
+          focusBtn.addEventListener('click', () => {
+            setButtonPending(focusBtn, `focus-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'focus_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
+          const minimizeBtn = document.createElement('button');
+          minimizeBtn.className = 'btn btn-xs';
+          minimizeBtn.textContent = 'Minimize';
+          minimizeBtn.addEventListener('click', () => {
+            setButtonPending(minimizeBtn, `minimize-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'minimize_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
+          const fpsBtn = document.createElement('button');
+          fpsBtn.className = 'btn btn-xs btn-info';
+          fpsBtn.textContent = 'Unlock FPS';
+          fpsBtn.addEventListener('click', () => {
+            setButtonPending(fpsBtn, `fps-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'disable_fps_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
 
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
           closeChar.textContent = 'Close';
-          closeChar.addEventListener('click', () => sendMessage({ type: 'close_character', character: client.character }));
-          row.appendChild(closeChar);
+          closeChar.addEventListener('click', () => {
+            setButtonPending(closeChar, `close-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
+          actions.appendChild(focusBtn);
+          actions.appendChild(minimizeBtn);
+          actions.appendChild(fpsBtn);
+          actions.appendChild(closeChar);
+          row.appendChild(label);
+          row.appendChild(actions);
           list.appendChild(row);
         });
 
@@ -318,15 +342,52 @@
         list.className = 'space-y-1 text-sm';
         clients.forEach(client => {
           const row = document.createElement('div');
-          row.className = 'flex items-center justify-between bg-gray-800 rounded px-2 py-1';
+          row.className = 'flex items-center justify-between bg-gray-800 rounded px-2 py-1 gap-2';
           const accountLabel = client.account ? ` <span class="text-xs text-gray-400">(${client.account})</span>` : '';
-          row.innerHTML = `<div>${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.server_ip || 'unknown'}</span></div>`;
+          const label = document.createElement('div');
+          label.innerHTML = `${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.server_ip || 'unknown'}</span>`;
+
+          const actions = document.createElement('div');
+          actions.className = 'flex items-center gap-1';
+
+          const focusBtn = document.createElement('button');
+          focusBtn.className = 'btn btn-xs';
+          focusBtn.textContent = 'Focus';
+          focusBtn.addEventListener('click', () => {
+            setButtonPending(focusBtn, `focus-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'focus_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
+          const minimizeBtn = document.createElement('button');
+          minimizeBtn.className = 'btn btn-xs';
+          minimizeBtn.textContent = 'Minimize';
+          minimizeBtn.addEventListener('click', () => {
+            setButtonPending(minimizeBtn, `minimize-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'minimize_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
+          const fpsBtn = document.createElement('button');
+          fpsBtn.className = 'btn btn-xs btn-info';
+          fpsBtn.textContent = 'Unlock FPS';
+          fpsBtn.addEventListener('click', () => {
+            setButtonPending(fpsBtn, `fps-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'disable_fps_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
 
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
           closeChar.textContent = 'Close';
-          closeChar.addEventListener('click', () => sendMessage({ type: 'close_character', character: client.character }));
-          row.appendChild(closeChar);
+          closeChar.addEventListener('click', () => {
+            setButtonPending(closeChar, `close-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
+          actions.appendChild(focusBtn);
+          actions.appendChild(minimizeBtn);
+          actions.appendChild(fpsBtn);
+          actions.appendChild(closeChar);
+          row.appendChild(label);
+          row.appendChild(actions);
           list.appendChild(row);
         });
 
@@ -358,6 +419,30 @@
           const buttonGroup = document.createElement('div');
           buttonGroup.className = 'flex items-center gap-1';
 
+          const focusBtn = document.createElement('button');
+          focusBtn.className = 'btn btn-xs';
+          focusBtn.textContent = 'Focus';
+          focusBtn.addEventListener('click', () => {
+            setButtonPending(focusBtn, `focus-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'focus_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
+          const minimizeBtn = document.createElement('button');
+          minimizeBtn.className = 'btn btn-xs';
+          minimizeBtn.textContent = 'Minimize';
+          minimizeBtn.addEventListener('click', () => {
+            setButtonPending(minimizeBtn, `minimize-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'minimize_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
+          const fpsBtn = document.createElement('button');
+          fpsBtn.className = 'btn btn-xs btn-info';
+          fpsBtn.textContent = 'Unlock FPS';
+          fpsBtn.addEventListener('click', () => {
+            setButtonPending(fpsBtn, `fps-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'disable_fps_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
           const reconnectBtn = document.createElement('button');
           reconnectBtn.className = 'btn btn-xs btn-accent';
           reconnectBtn.textContent = 'Reconnect';
@@ -372,9 +457,9 @@
               type: 'reconnect_client',
               character: client.character,
               machine: client.machine,
-              account: client.account || null
-            });
+            account: client.account || null
           });
+        });
 
           const requestBtn = document.createElement('button');
           requestBtn.className = 'btn btn-xs';
@@ -385,12 +470,24 @@
               type: 'request_status_client',
               character: client.character,
               machine: client.machine,
-              account: client.account || null
-            });
+            account: client.account || null
+          });
+        });
+
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'btn btn-xs btn-outline btn-error';
+          closeBtn.textContent = 'Close';
+          closeBtn.addEventListener('click', () => {
+            setButtonPending(closeBtn, `close-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
           });
 
           buttonGroup.appendChild(requestBtn);
+          buttonGroup.appendChild(focusBtn);
+          buttonGroup.appendChild(minimizeBtn);
+          buttonGroup.appendChild(fpsBtn);
           buttonGroup.appendChild(reconnectBtn);
+          buttonGroup.appendChild(closeBtn);
           header.appendChild(buttonGroup);
           container.appendChild(header);
           outsideList.appendChild(container);
@@ -453,21 +550,6 @@
     document.getElementById('request-status-unknown-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'request-status-unknown', 1200);
       sendMessage({ type: 'request_status_unknown' });
-    });
-
-    document.getElementById('close-machine-btn').addEventListener('click', () => {
-      const machine = document.getElementById('close-machine-name').value.trim();
-      if (machine) sendMessage({ type: 'close_machine', machine });
-    });
-
-    document.getElementById('close-server-btn').addEventListener('click', () => {
-      const serverIp = document.getElementById('close-server-ip').value.trim();
-      if (serverIp) sendMessage({ type: 'close_server', server_ip: serverIp });
-    });
-
-    document.getElementById('close-character-btn').addEventListener('click', () => {
-      const character = document.getElementById('close-character-name').value.trim();
-      if (character) sendMessage({ type: 'close_character', character });
     });
 
     document.getElementById('apply-ws-url').addEventListener('click', () => {

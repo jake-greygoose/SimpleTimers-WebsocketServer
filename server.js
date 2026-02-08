@@ -1461,6 +1461,49 @@ function requestStatusUnknown() {
   requestStatusMatching((info) => !info.server_ip || !info.character || !info.machine);
 }
 
+function sendCommandToClient(target, command) {
+  for (const [ws, info] of eotmClients.entries()) {
+    if (!info) continue;
+    if (target.machine && info.machine !== target.machine) continue;
+    if (target.character && info.character !== target.character) continue;
+    if (Object.prototype.hasOwnProperty.call(target, 'account')) {
+      if (target.account && info.account !== target.account) continue;
+      if (!target.account && info.account) continue;
+    }
+    sendEotmCommand(ws, command);
+    return true;
+  }
+  return false;
+}
+
+function focusClient(target) {
+  const found = sendCommandToClient(target, 'bring_to_front');
+  if (found) {
+    console.log('EOTM focus_client issued');
+  }
+}
+
+function minimizeClient(target) {
+  const found = sendCommandToClient(target, 'minimize');
+  if (found) {
+    console.log('EOTM minimize_client issued');
+  }
+}
+
+function disableFpsClient(target) {
+  const found = sendCommandToClient(target, 'disable_fps_limiter');
+  if (found) {
+    console.log('EOTM disable_fps_client issued');
+  }
+}
+
+function closeClient(target) {
+  const found = sendCommandToClient(target, { type: 'close_character', character: target.character });
+  if (found) {
+    console.log('EOTM close_client issued');
+  }
+}
+
 function reconnectMatching(predicate) {
   let count = 0;
   for (const [ws, info] of eotmClients.entries()) {
@@ -1754,6 +1797,34 @@ eotmAdminWss.on('connection', (ws) => {
         break;
       case 'request_status_unknown':
         requestStatusUnknown();
+        break;
+      case 'focus_client':
+        focusClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        });
+        break;
+      case 'minimize_client':
+        minimizeClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        });
+        break;
+      case 'disable_fps_client':
+        disableFpsClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        });
+        break;
+      case 'close_client':
+        closeClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        });
         break;
       default:
         console.warn(`EOTM unknown admin message type: ${message.type}`);
