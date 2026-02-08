@@ -78,7 +78,7 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
       <div class="stat-card">
         <div class="text-sm text-gray-400">Total Clients</div>
         <div id="total-clients" class="text-3xl font-bold">0</div>
@@ -92,6 +92,7 @@
         <div id="total-machines" class="text-3xl font-bold">0</div>
       </div>
     </div>
+    <div id="instance-summary" class="text-xs text-slate-300 mb-6 hidden"></div>
 
     <div class="panel p-4 mb-6">
       <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
@@ -105,6 +106,15 @@
             Refresh
           </button>
         </div>
+      </div>
+      <div class="flex flex-col sm:flex-row sm:items-center gap-2 mb-4 text-xs text-slate-300">
+        <span class="text-slate-400">Scope</span>
+        <select id="scope-type" class="select select-bordered select-sm bg-gray-800">
+          <option value="all">All</option>
+          <option value="instance">Instance IP</option>
+          <option value="machine">Machine</option>
+        </select>
+        <input id="scope-value" type="text" class="input input-bordered input-sm bg-gray-800 flex-1 min-w-[160px]" placeholder="Instance IP or Machine (optional)">
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         <div class="flex flex-col gap-2">
@@ -150,7 +160,7 @@
         <div class="flex gap-2">
           <button id="reconnect-outside-btn" class="btn btn-accent action-btn flex-1">
             <i class="fa-solid fa-plug-circle-bolt"></i>
-            Reconnect Outside
+            Reconnect
           </button>
           <button id="request-status-unknown-btn" class="btn btn-outline action-btn flex-1">
             <i class="fa-solid fa-satellite-dish"></i>
@@ -159,7 +169,7 @@
         </div>
         <div class="flex gap-2">
           <button id="disable-fps-btn" class="btn btn-info action-btn flex-1">
-            <i class="fa-solid fa-lock-open"></i>
+            <i class="fa-solid fa-lock"></i>
             Unlock FPS
           </button>
           <button id="close-all-btn" class="btn btn-error action-btn flex-1">
@@ -187,7 +197,7 @@
       <div id="machines-list" class="space-y-3 hidden"></div>
     </div>
 
-    <div class="panel p-4 mt-6">
+    <div id="outside-panel" class="panel p-4 mt-6">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-lg font-semibold">Outside EOTM</h2>
         <span class="text-xs text-gray-400">Clients without an active instance</span>
@@ -212,6 +222,10 @@
     const instancesList = document.getElementById('instances-list');
     const machinesList = document.getElementById('machines-list');
     const outsideList = document.getElementById('outside-list');
+    const outsidePanel = document.getElementById('outside-panel');
+    const instanceSummary = document.getElementById('instance-summary');
+    const scopeTypeSelect = document.getElementById('scope-type');
+    const scopeValueInput = document.getElementById('scope-value');
 
     function buildDefaultWsUrl() {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -317,6 +331,14 @@
       totalInstances.textContent = Object.keys(instances).length;
       totalMachines.textContent = Object.keys(machines).length;
 
+      const instanceIps = Object.keys(instances);
+      if (instanceIps.length > 1) {
+        instanceSummary.textContent = `Active instances: ${instanceIps.join(', ')}`;
+        instanceSummary.classList.remove('hidden');
+      } else {
+        instanceSummary.classList.add('hidden');
+      }
+
       instancesList.innerHTML = '';
       Object.entries(instances).forEach(([serverIp, clients]) => {
         const container = document.createElement('div');
@@ -328,7 +350,7 @@
 
         const closeBtn = document.createElement('button');
         closeBtn.className = 'btn btn-xs btn-warning';
-        closeBtn.textContent = 'Close Server';
+        closeBtn.textContent = 'Close Instance';
         closeBtn.addEventListener('click', () => sendMessage({ type: 'close_server', server_ip: serverIp }));
 
         header.appendChild(closeBtn);
@@ -372,7 +394,7 @@
 
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
-          closeChar.textContent = 'Close';
+          closeChar.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
           closeChar.addEventListener('click', () => {
             setButtonPending(closeChar, `close-${client.machine}-${client.character}-${client.account || ''}`, 800);
             sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
@@ -419,7 +441,7 @@
 
         const closeBtn = document.createElement('button');
         closeBtn.className = 'btn btn-xs btn-warning';
-        closeBtn.textContent = 'Close';
+        closeBtn.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
         closeBtn.addEventListener('click', () => sendMessage({ type: 'close_machine', machine }));
 
         actionGroup.appendChild(focusBtn);
@@ -466,7 +488,7 @@
 
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
-          closeChar.textContent = 'Close';
+          closeChar.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
           closeChar.addEventListener('click', () => {
             setButtonPending(closeChar, `close-${client.machine}-${client.character}-${client.account || ''}`, 800);
             sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
@@ -491,8 +513,13 @@
 
       outsideList.innerHTML = '';
       if (outside.length === 0) {
-        outsideList.innerHTML = '<div class="text-sm text-gray-400">All clients are currently in EOTM.</div>';
+        outsidePanel.classList.add('hidden');
+        document.getElementById('reconnect-outside-btn').disabled = true;
+        document.getElementById('reconnect-outside-btn').classList.add('btn-disabled');
       } else {
+        outsidePanel.classList.remove('hidden');
+        document.getElementById('reconnect-outside-btn').disabled = false;
+        document.getElementById('reconnect-outside-btn').classList.remove('btn-disabled');
         outside.forEach(client => {
           const container = document.createElement('div');
           container.className = 'bg-gray-700 rounded p-3';
@@ -566,7 +593,7 @@
 
           const closeBtn = document.createElement('button');
           closeBtn.className = 'btn btn-xs btn-outline btn-error';
-          closeBtn.textContent = 'Close';
+          closeBtn.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
           closeBtn.addEventListener('click', () => {
             setButtonPending(closeBtn, `close-${client.machine}-${client.character}-${client.account || ''}`, 800);
             sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
@@ -617,52 +644,61 @@
     instancesTab.addEventListener('click', () => setActiveList('instances'));
     machinesTab.addEventListener('click', () => setActiveList('machines'));
 
+    function getScopePayload() {
+      const scopeType = scopeTypeSelect.value;
+      const scopeValue = scopeValueInput.value.trim();
+      if (scopeType === 'all' || scopeValue.length === 0) {
+        return { scope_type: 'all', scope_value: null };
+      }
+      return { scope_type: scopeType, scope_value: scopeValue };
+    }
+
     document.getElementById('close-excess-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'close-excess', 800);
       const keepCount = Number(document.getElementById('close-excess-count').value || 0);
-      sendMessage({ type: 'close_excess', keep_count: keepCount });
+      sendMessage({ type: 'close_excess', keep_count: keepCount, ...getScopePayload() });
     });
 
     document.getElementById('keep-per-machine-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'keep-per-machine', 800);
       const keepCount = Number(document.getElementById('keep-per-machine-count').value || 0);
-      sendMessage({ type: 'keep_per_machine', keep_count: keepCount });
+      sendMessage({ type: 'keep_per_machine', keep_count: keepCount, ...getScopePayload() });
     });
 
     document.getElementById('set-fps-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'set-fps-all', 800);
       const fps = Number(document.getElementById('set-fps-value').value || 15);
-      sendMessage({ type: 'set_fps_all', fps });
+      sendMessage({ type: 'set_fps_all', fps, ...getScopePayload() });
     });
 
     document.getElementById('disable-fps-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'disable-fps', 800);
-      sendMessage({ type: 'disable_fps_limiter_all' });
+      sendMessage({ type: 'disable_fps_limiter_all', ...getScopePayload() });
     });
 
     document.getElementById('close-all-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'close-all', 800);
-      sendMessage({ type: 'close_all' });
+      sendMessage({ type: 'close_all', ...getScopePayload() });
     });
 
     document.getElementById('minimize-all-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'minimize-all', 800);
-      sendMessage({ type: 'minimize_all' });
+      sendMessage({ type: 'minimize_all', ...getScopePayload() });
     });
 
     document.getElementById('focus-all-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'focus-all', 800);
-      sendMessage({ type: 'focus_all' });
+      sendMessage({ type: 'focus_all', ...getScopePayload() });
     });
 
     document.getElementById('reconnect-outside-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'reconnect-outside', 1200);
-      sendMessage({ type: 'reconnect_all_outside' });
+      sendMessage({ type: 'reconnect_all_outside', ...getScopePayload() });
     });
 
     document.getElementById('request-status-unknown-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'request-status-unknown', 1200);
-      sendMessage({ type: 'request_status_unknown' });
+      sendMessage({ type: 'request_status_unknown', ...getScopePayload() });
     });
 
     connect();

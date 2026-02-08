@@ -1426,6 +1426,131 @@ function focusAll() {
   console.log('EOTM focus_all queued');
 }
 
+function buildScopePredicate(scopeType, scopeValue) {
+  if (!scopeType || scopeType === 'all') return () => true;
+  if (!scopeValue) return () => false;
+  if (scopeType === 'instance') {
+    return (info) => info && info.server_ip === scopeValue;
+  }
+  if (scopeType === 'machine') {
+    return (info) => info && info.machine === scopeValue;
+  }
+  return () => true;
+}
+
+function forEachScopedClient(scopeType, scopeValue, handler) {
+  const predicate = buildScopePredicate(scopeType, scopeValue);
+  for (const [ws, info] of eotmClients.entries()) {
+    if (!predicate(info)) continue;
+    handler(ws, info);
+  }
+}
+
+function closeAllScoped(scopeType, scopeValue) {
+  forEachScopedClient(scopeType, scopeValue, (ws) => sendEotmCommand(ws, 'close_game'));
+  console.log(`EOTM close_all scoped: ${scopeType || 'all'} ${scopeValue || ''}`.trim());
+}
+
+function setFpsScoped(fps, scopeType, scopeValue) {
+  forEachScopedClient(scopeType, scopeValue, (ws) => sendEotmCommand(ws, { type: 'set_fps', fps }));
+  console.log(`EOTM set_fps_all scoped: ${fps}`);
+}
+
+function disableFpsScoped(scopeType, scopeValue) {
+  forEachScopedClient(scopeType, scopeValue, (ws) => sendEotmCommand(ws, 'disable_fps_limiter'));
+  console.log('EOTM disable_fps_limiter_all scoped');
+}
+
+function minimizeScoped(scopeType, scopeValue) {
+  forEachScopedClient(scopeType, scopeValue, (ws) => sendEotmCommand(ws, 'minimize'));
+  console.log('EOTM minimize_all scoped');
+}
+
+function focusScoped(scopeType, scopeValue) {
+  if (!scopeType || scopeType === 'all') {
+    focusAll();
+    return;
+  }
+  if (scopeType === 'machine' && scopeValue) {
+    focusMachine(scopeValue);
+    return;
+  }
+  if (scopeType === 'instance' && scopeValue) {
+    const machineBuckets = new Map();
+    for (const [ws, info] of eotmClients.entries()) {
+      if (!info || info.server_ip !== scopeValue || !info.machine) continue;
+      const list = machineBuckets.get(info.machine) || [];
+      list.push(ws);
+      machineBuckets.set(info.machine, list);
+    }
+    for (const [machine, wsList] of machineBuckets.entries()) {
+      enqueueFocusForMachine(machine, wsList);
+    }
+  }
+}
+
+function closeExcessScoped(keepCount, scopeType, scopeValue) {
+  if (!scopeType || scopeType === 'all') {
+    closeExcessClients(keepCount);
+    return;
+  }
+  if (scopeType === 'instance' && scopeValue) {
+    const wsSet = eotmInstances.get(scopeValue);
+    if (!wsSet) return;
+    const clientsArray = Array.from(wsSet);
+    if (clientsArray.length <= keepCount) return;
+    clientsArray.sort((a, b) => {
+      const aInfo = eotmClients.get(a);
+      const bInfo = eotmClients.get(b);
+      return (bInfo?.last_update || 0) - (aInfo?.last_update || 0);
+    });
+    const toClose = clientsArray.slice(keepCount);
+    for (const ws of toClose) {
+      sendEotmCommand(ws, 'close_game');
+    }
+    console.log(`EOTM close_excess scoped: ${scopeValue}`);
+  }
+}
+
+function keepPerMachineScoped(keepCount, scopeType, scopeValue) {
+  if (!scopeType || scopeType === 'all') {
+    keepPerMachine(keepCount);
+    return;
+  }
+  if (scopeType === 'machine' && scopeValue) {
+    const wsSet = eotmMachines.get(scopeValue);
+    if (!wsSet) return;
+    const clientsArray = Array.from(wsSet);
+    if (clientsArray.length <= keepCount) return;
+    clientsArray.sort((a, b) => {
+      const aInfo = eotmClients.get(a);
+      const bInfo = eotmClients.get(b);
+      return (bInfo?.last_update || 0) - (aInfo?.last_update || 0);
+    });
+    const toClose = clientsArray.slice(keepCount);
+    for (const ws of toClose) {
+      sendEotmCommand(ws, 'close_game');
+    }
+    console.log(`EOTM keep_per_machine scoped: ${scopeValue}`);
+  }
+}
+
+function reconnectOutsideScoped(scopeType, scopeValue) {
+  forEachScopedClient(scopeType, scopeValue, (ws, info) => {
+    if (!info.server_ip) {
+      sendEotmCommand(ws, 'reconnect');
+    }
+  });
+  console.log('EOTM reconnect_all_outside scoped');
+}
+
+function requestStatusUnknownScoped(scopeType, scopeValue) {
+  requestStatusMatching((info) => {
+    if (!buildScopePredicate(scopeType, scopeValue)(info)) return false;
+    return !info.server_ip || !info.character || !info.machine;
+  });
+}
+
 function requestStatusMatching(predicate) {
   let count = 0;
   const now = Date.now();
@@ -1735,10 +1860,10 @@ eotmAdminWss.on('connection', (ws) => {
         sendEotmCommand(ws, getEotmStatus());
         break;
       case 'close_excess':
-        closeExcessClients(Number(message.keep_count) || 0);
+        closeExcessScoped(Number(message.keep_count) || 0, message.scope_type, message.scope_value);
         break;
       case 'keep_per_machine':
-        keepPerMachine(Number(message.keep_count) || 0);
+        keepPerMachineScoped(Number(message.keep_count) || 0, message.scope_type, message.scope_value);
         break;
       case 'close_machine':
         if (message.machine) closeMachine(message.machine);
@@ -1750,18 +1875,18 @@ eotmAdminWss.on('connection', (ws) => {
         if (message.character) closeCharacter(message.character);
         break;
       case 'close_all':
-        closeAllEotm();
+        closeAllScoped(message.scope_type, message.scope_value);
         break;
       case 'set_fps_all':
         if (Number.isFinite(Number(message.fps))) {
-          setFpsAll(Number(message.fps));
+          setFpsScoped(Number(message.fps), message.scope_type, message.scope_value);
         }
         break;
       case 'disable_fps_limiter_all':
-        disableFpsLimiterAll();
+        disableFpsScoped(message.scope_type, message.scope_value);
         break;
       case 'minimize_all':
-        minimizeAll();
+        minimizeScoped(message.scope_type, message.scope_value);
         break;
       case 'minimize_machine':
         if (message.machine) minimizeMachine(message.machine);
@@ -1770,7 +1895,7 @@ eotmAdminWss.on('connection', (ws) => {
         if (message.machine) focusMachine(message.machine);
         break;
       case 'focus_all':
-        focusAll();
+        focusScoped(message.scope_type, message.scope_value);
         break;
       case 'reconnect_client':
         reconnectClient({
@@ -1783,7 +1908,7 @@ eotmAdminWss.on('connection', (ws) => {
         if (message.machine) reconnectMachine(message.machine);
         break;
       case 'reconnect_all_outside':
-        reconnectAllOutside();
+        reconnectOutsideScoped(message.scope_type, message.scope_value);
         break;
       case 'request_status_client':
         requestStatusClient({
@@ -1796,7 +1921,7 @@ eotmAdminWss.on('connection', (ws) => {
         if (message.machine) requestStatusMachine(message.machine);
         break;
       case 'request_status_unknown':
-        requestStatusUnknown();
+        requestStatusUnknownScoped(message.scope_type, message.scope_value);
         break;
       case 'focus_client':
         focusClient({
