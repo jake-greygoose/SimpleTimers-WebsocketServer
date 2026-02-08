@@ -436,6 +436,14 @@
             openSqjoinModal({ character: client.character, machine: client.machine, account: client.account || null });
           });
 
+          const sqleaveBtn = document.createElement('button');
+          sqleaveBtn.className = 'btn btn-xs btn-outline';
+          sqleaveBtn.textContent = 'Leave Squad';
+          sqleaveBtn.addEventListener('click', () => {
+            setButtonPending(sqleaveBtn, `sqleave-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'sqleave_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
           closeChar.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
@@ -448,6 +456,7 @@
           actions.appendChild(minimizeBtn);
           actions.appendChild(fpsBtn);
           actions.appendChild(sqjoinBtn);
+          actions.appendChild(sqleaveBtn);
           actions.appendChild(closeChar);
           row.appendChild(label);
           row.appendChild(actions);
@@ -538,6 +547,14 @@
             openSqjoinModal({ character: client.character, machine: client.machine, account: client.account || null });
           });
 
+          const sqleaveBtn = document.createElement('button');
+          sqleaveBtn.className = 'btn btn-xs btn-outline';
+          sqleaveBtn.textContent = 'Leave Squad';
+          sqleaveBtn.addEventListener('click', () => {
+            setButtonPending(sqleaveBtn, `sqleave-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'sqleave_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
           closeChar.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
@@ -550,6 +567,7 @@
           actions.appendChild(minimizeBtn);
           actions.appendChild(fpsBtn);
           actions.appendChild(sqjoinBtn);
+          actions.appendChild(sqleaveBtn);
           actions.appendChild(closeChar);
           row.appendChild(label);
           row.appendChild(actions);
@@ -620,6 +638,14 @@
             openSqjoinModal({ character: client.character, machine: client.machine, account: client.account || null });
           });
 
+          const sqleaveBtn = document.createElement('button');
+          sqleaveBtn.className = 'btn btn-xs btn-outline';
+          sqleaveBtn.textContent = 'Leave Squad';
+          sqleaveBtn.addEventListener('click', () => {
+            setButtonPending(sqleaveBtn, `sqleave-${client.machine}-${client.character}-${client.account || ''}`, 800);
+            sendMessage({ type: 'sqleave_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
           const reconnectBtn = document.createElement('button');
           reconnectBtn.className = 'btn btn-xs btn-accent';
           reconnectBtn.textContent = 'Reconnect';
@@ -664,6 +690,7 @@
           buttonGroup.appendChild(minimizeBtn);
           buttonGroup.appendChild(fpsBtn);
           buttonGroup.appendChild(sqjoinBtn);
+          buttonGroup.appendChild(sqleaveBtn);
           buttonGroup.appendChild(reconnectBtn);
           buttonGroup.appendChild(closeBtn);
           header.appendChild(buttonGroup);

@@ -1637,6 +1637,13 @@ function sqjoinClient(target, name) {
   }
 }
 
+function sqleaveClient(target) {
+  const found = sendCommandToClient(target, { type: 'sqleave' });
+  if (found) {
+    console.log('EOTM sqleave_client issued');
+  }
+}
+
 function reconnectMatching(predicate) {
   let count = 0;
   for (const [ws, info] of eotmClients.entries()) {
@@ -1965,6 +1972,13 @@ eotmAdminWss.on('connection', (ws) => {
           character: message.character || null,
           account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
         }, message.name);
+        break;
+      case 'sqleave_client':
+        sqleaveClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        });
         break;
       default:
         console.warn(`EOTM unknown admin message type: ${message.type}`);
