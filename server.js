@@ -1072,7 +1072,11 @@ const eotmInstances = new Map();
 const eotmMachines = new Map();
 const eotmAdmins = new Set();
 const focusQueues = new Map();
+const closeQueues = new Map();
+const closeQueueIds = new WeakMap();
+let closeQueueIdCounter = 0;
 const STATUS_REQUEST_COOLDOWN_MS = 30000;
+const CLOSE_COMMAND_INTERVAL_MS = Number(process.env.EOTM_CLOSE_COMMAND_INTERVAL_MS || 350);
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -1100,6 +1104,13 @@ function normalizeServerIp(value) {
   if (value === '0.0.0.0') return null;
   if (value === 'Unknown IP') return null;
   return value;
+}
+
+function parseMemoryLimitMb(value) {
+  const mb = Number(value);
+  if (!Number.isInteger(mb)) return null;
+  if (mb < 256 || mb > 32768) return null;
+  return mb;
 }
 
 function enqueueFocusForMachine(machine, wsList) {
@@ -1228,6 +1239,51 @@ function sendEotmCommand(ws, message) {
   }
 }
 
+function getCloseQueueKey(ws) {
+  const info = eotmClients.get(ws);
+  if (info?.machine) return `machine:${info.machine}`;
+  let id = closeQueueIds.get(ws);
+  if (!id) {
+    closeQueueIdCounter += 1;
+    id = closeQueueIdCounter;
+    closeQueueIds.set(ws, id);
+  }
+  return `client:${id}`;
+}
+
+function enqueueCloseCommand(ws, message) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const key = getCloseQueueKey(ws);
+  let queueState = closeQueues.get(key);
+
+  if (!queueState) {
+    queueState = { queue: [], timer: null };
+    closeQueues.set(key, queueState);
+  }
+
+  queueState.queue.push({ ws, message });
+
+  if (queueState.timer) return;
+
+  queueState.timer = setInterval(() => {
+    const current = closeQueues.get(key);
+    if (!current) return;
+
+    while (current.queue.length > 0) {
+      const next = current.queue.shift();
+      if (!next) break;
+      if (next.ws.readyState !== WebSocket.OPEN) continue;
+      sendEotmCommand(next.ws, next.message);
+      break;
+    }
+
+    if (current.queue.length === 0) {
+      clearInterval(current.timer);
+      closeQueues.delete(key);
+    }
+  }, CLOSE_COMMAND_INTERVAL_MS);
+}
+
 function updateEotmClientMapping(ws, update, now) {
   const current = eotmClients.get(ws) || {
     character: null,
@@ -1313,7 +1369,7 @@ function closeExcessClients(keepCount) {
     });
     const toClose = clientsArray.slice(keepCount);
     for (const ws of toClose) {
-      sendEotmCommand(ws, 'close_game');
+      enqueueCloseCommand(ws, 'close_game');
     }
     console.log(`EOTM close_excess: ${toClose.length} clients closed on server ${serverIp}`);
   }
@@ -1330,7 +1386,7 @@ function keepPerMachine(keepCount) {
     });
     const toClose = clientsArray.slice(keepCount);
     for (const ws of toClose) {
-      sendEotmCommand(ws, 'close_game');
+      enqueueCloseCommand(ws, 'close_game');
     }
     console.log(`EOTM keep_per_machine: ${toClose.length} clients closed on machine ${machine}`);
   }
@@ -1340,7 +1396,7 @@ function closeMachine(machine) {
   const wsSet = eotmMachines.get(machine);
   if (!wsSet) return;
   for (const ws of wsSet) {
-    sendEotmCommand(ws, 'close_game');
+    enqueueCloseCommand(ws, 'close_game');
   }
   console.log(`EOTM close_machine: ${machine}`);
 }
@@ -1349,7 +1405,7 @@ function closeServer(serverIp) {
   const wsSet = eotmInstances.get(serverIp);
   if (!wsSet) return;
   for (const ws of wsSet) {
-    sendEotmCommand(ws, { type: 'close_server', server_ip: serverIp });
+    enqueueCloseCommand(ws, { type: 'close_server', server_ip: serverIp });
   }
   console.log(`EOTM close_server: ${serverIp}`);
 }
@@ -1357,7 +1413,7 @@ function closeServer(serverIp) {
 function closeCharacter(character) {
   for (const [ws, info] of eotmClients.entries()) {
     if (info.character === character) {
-      sendEotmCommand(ws, { type: 'close_character', character });
+      enqueueCloseCommand(ws, { type: 'close_character', character });
     }
   }
   console.log(`EOTM close_character: ${character}`);
@@ -1365,7 +1421,7 @@ function closeCharacter(character) {
 
 function closeAllEotm() {
   for (const ws of eotmClients.keys()) {
-    sendEotmCommand(ws, 'close_game');
+    enqueueCloseCommand(ws, 'close_game');
   }
   console.log('EOTM close_all issued');
 }
@@ -1447,7 +1503,7 @@ function forEachScopedClient(scopeType, scopeValue, handler) {
 }
 
 function closeAllScoped(scopeType, scopeValue) {
-  forEachScopedClient(scopeType, scopeValue, (ws) => sendEotmCommand(ws, 'close_game'));
+  forEachScopedClient(scopeType, scopeValue, (ws) => enqueueCloseCommand(ws, 'close_game'));
   console.log(`EOTM close_all scoped: ${scopeType || 'all'} ${scopeValue || ''}`.trim());
 }
 
@@ -1459,6 +1515,11 @@ function setFpsScoped(fps, scopeType, scopeValue) {
 function disableFpsScoped(scopeType, scopeValue) {
   forEachScopedClient(scopeType, scopeValue, (ws) => sendEotmCommand(ws, 'disable_fps_limiter'));
   console.log('EOTM disable_fps_limiter_all scoped');
+}
+
+function setMemoryLimitScoped(mb, scopeType, scopeValue) {
+  forEachScopedClient(scopeType, scopeValue, (ws) => sendEotmCommand(ws, { type: 'set_memory_limit', mb }));
+  console.log(`EOTM set_memory_limit_all scoped: ${mb}`);
 }
 
 function minimizeScoped(scopeType, scopeValue) {
@@ -1506,9 +1567,26 @@ function closeExcessScoped(keepCount, scopeType, scopeValue) {
     });
     const toClose = clientsArray.slice(keepCount);
     for (const ws of toClose) {
-      sendEotmCommand(ws, 'close_game');
+      enqueueCloseCommand(ws, 'close_game');
     }
     console.log(`EOTM close_excess scoped: ${scopeValue}`);
+    return;
+  }
+  if (scopeType === 'machine' && scopeValue) {
+    const wsSet = eotmMachines.get(scopeValue);
+    if (!wsSet) return;
+    const clientsArray = Array.from(wsSet);
+    if (clientsArray.length <= keepCount) return;
+    clientsArray.sort((a, b) => {
+      const aInfo = eotmClients.get(a);
+      const bInfo = eotmClients.get(b);
+      return (bInfo?.last_update || 0) - (aInfo?.last_update || 0);
+    });
+    const toClose = clientsArray.slice(keepCount);
+    for (const ws of toClose) {
+      enqueueCloseCommand(ws, 'close_game');
+    }
+    console.log(`EOTM close_excess scoped: machine ${scopeValue}`);
   }
 }
 
@@ -1529,7 +1607,7 @@ function keepPerMachineScoped(keepCount, scopeType, scopeValue) {
     });
     const toClose = clientsArray.slice(keepCount);
     for (const ws of toClose) {
-      sendEotmCommand(ws, 'close_game');
+      enqueueCloseCommand(ws, 'close_game');
     }
     console.log(`EOTM keep_per_machine scoped: ${scopeValue}`);
   }
@@ -1622,8 +1700,27 @@ function disableFpsClient(target) {
   }
 }
 
+function setMemoryLimitClient(target, mb) {
+  const found = sendCommandToClient(target, { type: 'set_memory_limit', mb });
+  if (found) {
+    console.log(`EOTM set_memory_limit_client issued: ${mb}`);
+  }
+}
+
 function closeClient(target) {
-  const found = sendCommandToClient(target, { type: 'close_character', character: target.character });
+  let found = false;
+  for (const [ws, info] of eotmClients.entries()) {
+    if (!info) continue;
+    if (target.machine && info.machine !== target.machine) continue;
+    if (target.character && info.character !== target.character) continue;
+    if (Object.prototype.hasOwnProperty.call(target, 'account')) {
+      if (target.account && info.account !== target.account) continue;
+      if (!target.account && info.account) continue;
+    }
+    enqueueCloseCommand(ws, { type: 'close_character', character: target.character });
+    found = true;
+    break;
+  }
   if (found) {
     console.log('EOTM close_client issued');
   }
@@ -1897,6 +1994,13 @@ eotmAdminWss.on('connection', (ws) => {
           setFpsScoped(Number(message.fps), message.scope_type, message.scope_value);
         }
         break;
+      case 'set_memory_limit_all': {
+        const mb = parseMemoryLimitMb(message.mb);
+        if (mb !== null) {
+          setMemoryLimitScoped(mb, message.scope_type, message.scope_value);
+        }
+        break;
+      }
       case 'disable_fps_limiter_all':
         disableFpsScoped(message.scope_type, message.scope_value);
         break;
@@ -1959,6 +2063,33 @@ eotmAdminWss.on('connection', (ws) => {
           account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
         });
         break;
+      case 'set_memory_limit_client': {
+        const mb = parseMemoryLimitMb(message.mb);
+        if (mb !== null) {
+          setMemoryLimitClient({
+            machine: message.machine || null,
+            character: message.character || null,
+            account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+          }, mb);
+        }
+        break;
+      }
+      case 'set_memory_limit': {
+        const mb = parseMemoryLimitMb(message.mb);
+        if (mb !== null) {
+          const hasTarget = Boolean(message.machine || message.character || Object.prototype.hasOwnProperty.call(message, 'account'));
+          if (hasTarget) {
+            setMemoryLimitClient({
+              machine: message.machine || null,
+              character: message.character || null,
+              account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+            }, mb);
+          } else {
+            setMemoryLimitScoped(mb, message.scope_type, message.scope_value);
+          }
+        }
+        break;
+      }
       case 'close_client':
         closeClient({
           machine: message.machine || null,

@@ -149,6 +149,16 @@
             </button>
           </div>
         </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs text-slate-400">Memory Limit (MB)</label>
+          <div class="flex gap-2 items-center">
+            <input id="set-memory-limit-value" type="number" min="256" max="32768" step="1" value="2048" class="input input-bordered w-24 bg-gray-800">
+            <button id="set-memory-limit-btn" class="btn btn-info action-btn flex-1">
+              <i class="fa-solid fa-memory"></i>
+              Set Memory All
+            </button>
+          </div>
+        </div>
         <div class="flex gap-2">
           <button id="minimize-all-btn" class="btn btn-secondary action-btn flex-1">
             <i class="fa-regular fa-window-minimize"></i>
@@ -811,6 +821,14 @@
       setButtonPending(event.currentTarget, 'set-fps-all', 800);
       const fps = Number(document.getElementById('set-fps-value').value || 15);
       sendMessage({ type: 'set_fps_all', fps, ...getScopePayload() });
+    });
+
+    document.getElementById('set-memory-limit-btn').addEventListener('click', (event) => {
+      const input = document.getElementById('set-memory-limit-value');
+      const mb = Number(input.value || 2048);
+      if (!Number.isInteger(mb) || mb < 256 || mb > 32768) return;
+      setButtonPending(event.currentTarget, 'set-memory-limit-all', 800);
+      sendMessage({ type: 'set_memory_limit_all', mb, ...getScopePayload() });
     });
 
     document.getElementById('disable-fps-btn').addEventListener('click', (event) => {
