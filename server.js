@@ -1745,7 +1745,7 @@ function sqleaveClient(target) {
 }
 
 function enterMapClient(target) {
-  const found = sendCommandToClient(target, { type: 'enter_map' });
+  const found = sendCommandToClient(target, 'enter_map');
   if (found) console.log('EOTM enter_map_client issued');
 }
 
