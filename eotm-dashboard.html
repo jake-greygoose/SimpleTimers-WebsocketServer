@@ -189,6 +189,22 @@
             Close All
           </button>
         </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs text-slate-400">Squad name</label>
+          <div class="flex gap-2 items-center">
+            <input id="sqjoin-all-name" type="text" placeholder="Account.1234" class="input input-bordered input-sm bg-gray-800 flex-1 min-w-0">
+            <button id="sqjoin-all-btn" class="btn btn-accent action-btn">
+              <i class="fa-solid fa-people-group"></i>
+              Join All
+            </button>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button id="sqleave-all-btn" class="btn btn-outline action-btn flex-1">
+            <i class="fa-solid fa-person-walking-arrow-right"></i>
+            Leave Squad All
+          </button>
+        </div>
       </div>
     </div>
 
@@ -944,6 +960,18 @@
     document.getElementById('request-status-unknown-btn').addEventListener('click', (event) => {
       setButtonPending(event.currentTarget, 'request-status-unknown', 1200);
       sendMessage({ type: 'request_status_unknown', ...getScopePayload() });
+    });
+
+    document.getElementById('sqjoin-all-btn').addEventListener('click', (event) => {
+      const name = document.getElementById('sqjoin-all-name').value.trim();
+      if (!name) return;
+      setButtonPending(event.currentTarget, 'sqjoin-all', 800);
+      sendMessage({ type: 'sqjoin_all', name, ...getScopePayload() });
+    });
+
+    document.getElementById('sqleave-all-btn').addEventListener('click', (event) => {
+      setButtonPending(event.currentTarget, 'sqleave-all', 800);
+      sendMessage({ type: 'sqleave_all', ...getScopePayload() });
     });
 
     // ==================== Launch Sequence ====================

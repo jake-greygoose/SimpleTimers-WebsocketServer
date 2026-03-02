@@ -1744,6 +1744,17 @@ function sqleaveClient(target) {
   }
 }
 
+function sqjoinScoped(name, scopeType, scopeValue) {
+  if (!name) return;
+  forEachScopedClient(scopeType, scopeValue, (ws) => sendEotmCommand(ws, { type: 'sqjoin', name }));
+  console.log(`EOTM sqjoin_all scoped: ${name}`);
+}
+
+function sqleaveScoped(scopeType, scopeValue) {
+  forEachScopedClient(scopeType, scopeValue, (ws) => sendEotmCommand(ws, { type: 'sqleave' }));
+  console.log('EOTM sqleave_all scoped');
+}
+
 function enterMapClient(target) {
   const found = sendCommandToClient(target, 'enter_map');
   if (found) console.log('EOTM enter_map_client issued');
@@ -2141,6 +2152,12 @@ eotmAdminWss.on('connection', (ws) => {
           character: message.character || null,
           account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
         });
+        break;
+      case 'sqjoin_all':
+        if (message.name) sqjoinScoped(message.name, message.scope_type, message.scope_value);
+        break;
+      case 'sqleave_all':
+        sqleaveScoped(message.scope_type, message.scope_value);
         break;
       case 'enter_map_client':
         enterMapClient({
