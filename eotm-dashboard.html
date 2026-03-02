@@ -211,10 +211,6 @@
           <input id="ls-check-delay" type="number" min="1" max="120" value="5" class="input input-bordered input-sm bg-gray-800">
         </div>
         <div class="flex flex-col gap-1">
-          <label class="text-xs text-slate-400">Hold time (s)</label>
-          <input id="ls-hold-time" type="number" min="5" max="600" value="60" class="input input-bordered input-sm bg-gray-800">
-        </div>
-        <div class="flex flex-col gap-1">
           <label class="text-xs text-slate-400">Overlap window (s)</label>
           <input id="ls-overlap-window" type="number" min="1" max="120" value="8" class="input input-bordered input-sm bg-gray-800">
         </div>
@@ -979,9 +975,9 @@
       // Tracks when each client first appeared in instances during this run
       inMapTimes: new Map(),
       inMapClients: new Map(),
-      // Each entry: { fireAt: number, target: {key, client} | null }
-      // target=null → pick oldest eligible (steps mode)
-      // target set  → send to that specific client (flood mode)
+      // Each entry: { fireAt: number, target: {key, client} }
+      // Fires when an instance exceeds capacity — always targets the oldest
+      // client on that specific over-cap instance
       pendingCharSelectFires: [],
       // Keys already scheduled for char_select (prevent double-fire)
       pendingCharSelectKeys: new Set(),
@@ -993,7 +989,6 @@
       return {
         sendIntervalMs: Math.max(100, Number(document.getElementById('ls-send-interval').value) || 500),
         checkDelayMs: Math.max(1000, (Number(document.getElementById('ls-check-delay').value) || 5) * 1000),
-        holdTimeMs: Math.max(1000, (Number(document.getElementById('ls-hold-time').value) || 60) * 1000),
         overlapWindowMs: Math.max(500, (Number(document.getElementById('ls-overlap-window').value) || 8) * 1000),
         instanceCapacity: Math.max(1, Number(document.getElementById('ls-instance-capacity').value) || 30),
       };
@@ -1119,10 +1114,6 @@
       sendMessage({ type: cmd, character: client.character, machine: client.machine, account: client.account || null });
       launchSeq.sentThisStep++;
 
-      // Schedule oldest-eligible char_select after overlap window (steps mode)
-      launchSeq.pendingCharSelectFires.push({ fireAt: Date.now() + launchSeq.settings.overlapWindowMs, target: null });
-      launchSeq.pendingCharSelectFires.sort((a, b) => a.fireAt - b.fireAt);
-
       updateLsUI();
       launchSeq.tickTimer = setTimeout(lsTick, launchSeq.settings.sendIntervalMs);
     }
@@ -1202,11 +1193,7 @@
       const now = Date.now();
       while (launchSeq.pendingCharSelectFires.length > 0 && launchSeq.pendingCharSelectFires[0].fireAt <= now) {
         const entry = launchSeq.pendingCharSelectFires.shift();
-        if (entry.target) {
-          lsSendCharSelectTo(entry.target);
-        } else {
-          lsSendCharSelectToOldest();
-        }
+        lsSendCharSelectTo(entry.target);
       }
     }
 
@@ -1215,28 +1202,6 @@
       sendMessage({ type: 'go_to_character_select_client', character: client.character, machine: client.machine, account: client.account || null });
       launchSeq.charSelectedClients.add(key);
       // pendingCharSelectKeys already set at schedule time
-    }
-
-    function lsSendCharSelectToOldest() {
-      const holdCutoff = Date.now() - launchSeq.settings.holdTimeMs;
-      let oldestKey = null;
-      let oldestTime = Infinity;
-
-      for (const [key, enteredAt] of launchSeq.inMapTimes.entries()) {
-        if (enteredAt <= holdCutoff && enteredAt < oldestTime && !launchSeq.pendingCharSelectKeys.has(key)) {
-          oldestKey = key;
-          oldestTime = enteredAt;
-        }
-      }
-
-      if (!oldestKey) return;
-
-      const client = launchSeq.inMapClients.get(oldestKey);
-      if (!client) return;
-
-      sendMessage({ type: 'go_to_character_select_client', character: client.character, machine: client.machine, account: client.account || null });
-      launchSeq.charSelectedClients.add(oldestKey);
-      launchSeq.pendingCharSelectKeys.add(oldestKey);
     }
 
     function lsTrackInMap(instances) {
@@ -1259,9 +1224,7 @@
           launchSeq.pendingCharSelectKeys.delete(key);
         }
       }
-      if (launchSeq.mode === 'flood') {
-        lsCheckInstanceCaps();
-      }
+      lsCheckInstanceCaps();
     }
 
     function updateLsUI() {
