@@ -1168,7 +1168,8 @@ function getEotmStatus() {
       instances[serverIp].push({
         character: info.character || 'Unknown',
         account: info.account || '',
-        machine: info.machine || 'Unknown'
+        machine: info.machine || 'Unknown',
+        enter_map_status: info.enter_map_status || null
       });
     }
   }
@@ -1196,6 +1197,8 @@ function getEotmStatus() {
         leave_reason: info.leave_reason || null,
         reconnect_status: info.reconnect_status || null,
         reconnect_reason: info.reconnect_reason || null,
+        enter_map_status: info.enter_map_status || null,
+        enter_map_reason: info.enter_map_reason || null,
         needs_status: !info.server_ip || !info.character || !info.machine
       });
     }
@@ -1741,6 +1744,16 @@ function sqleaveClient(target) {
   }
 }
 
+function enterMapClient(target) {
+  const found = sendCommandToClient(target, { type: 'enter_map' });
+  if (found) console.log('EOTM enter_map_client issued');
+}
+
+function goToCharacterSelectClient(target) {
+  const found = sendCommandToClient(target, { type: 'go_to_character_select' });
+  if (found) console.log('EOTM go_to_character_select_client issued');
+}
+
 function reconnectMatching(predicate) {
   let count = 0;
   for (const [ws, info] of eotmClients.entries()) {
@@ -1785,6 +1798,8 @@ eotmWss.on('connection', (ws, req) => {
     leave_reason: null,
     reconnect_status: null,
     reconnect_reason: null,
+    enter_map_status: null,
+    enter_map_reason: null,
     last_status_request: 0,
     last_update: now
   });
@@ -1927,6 +1942,22 @@ eotmWss.on('connection', (ws, req) => {
           reconnect_status: 'reconnect_failed',
           reconnect_reason: message.reason || null
         }, timestamp);
+        notifyEotmAdmins();
+        break;
+      case 'enter_map_started':
+        updateEotmClientMapping(ws, { enter_map_status: 'started', enter_map_reason: null }, timestamp);
+        notifyEotmAdmins();
+        break;
+      case 'enter_map_complete':
+        updateEotmClientMapping(ws, { enter_map_status: 'complete', enter_map_reason: null }, timestamp);
+        notifyEotmAdmins();
+        break;
+      case 'enter_map_failed':
+        updateEotmClientMapping(ws, { enter_map_status: 'failed', enter_map_reason: message.reason || null }, timestamp);
+        notifyEotmAdmins();
+        break;
+      case 'go_to_character_select_sent':
+        updateEotmClientMapping(ws, { enter_map_status: null, enter_map_reason: null }, timestamp);
         notifyEotmAdmins();
         break;
       default:
@@ -2106,6 +2137,20 @@ eotmAdminWss.on('connection', (ws) => {
         break;
       case 'sqleave_client':
         sqleaveClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        });
+        break;
+      case 'enter_map_client':
+        enterMapClient({
+          machine: message.machine || null,
+          character: message.character || null,
+          account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null
+        });
+        break;
+      case 'go_to_character_select_client':
+        goToCharacterSelectClient({
           machine: message.machine || null,
           character: message.character || null,
           account: Object.prototype.hasOwnProperty.call(message, 'account') ? message.account : null

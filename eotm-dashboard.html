@@ -192,6 +192,69 @@
       </div>
     </div>
 
+    <div class="panel p-4 mb-4" id="launch-panel">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        <div>
+          <h2 class="text-lg font-semibold">Launch Sequence</h2>
+          <p class="text-xs text-slate-400">Controlled EOTM map entry with instance-aware rotation.</p>
+        </div>
+        <span id="ls-status-badge" class="badge badge-ghost text-xs self-start sm:self-auto">Idle</span>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-slate-400">Send interval (ms)</label>
+          <input id="ls-send-interval" type="number" min="100" max="10000" value="500" class="input input-bordered input-sm bg-gray-800">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-slate-400">Check delay (s)</label>
+          <input id="ls-check-delay" type="number" min="1" max="120" value="5" class="input input-bordered input-sm bg-gray-800">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-slate-400">Hold time (s)</label>
+          <input id="ls-hold-time" type="number" min="5" max="600" value="60" class="input input-bordered input-sm bg-gray-800">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-slate-400">Overlap window (s)</label>
+          <input id="ls-overlap-window" type="number" min="1" max="120" value="8" class="input input-bordered input-sm bg-gray-800">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-slate-400">Instance capacity</label>
+          <input id="ls-instance-capacity" type="number" min="1" max="200" value="30" class="input input-bordered input-sm bg-gray-800">
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <div class="text-xs text-slate-400 mb-2">Steps — pause when new instance detected after each</div>
+        <div id="ls-steps-list" class="flex flex-wrap gap-2 mb-2 min-h-[2rem] items-center"></div>
+        <div class="flex gap-2">
+          <button id="ls-add-fixed" class="btn btn-xs btn-outline">+ Fixed count</button>
+          <button id="ls-add-fill" class="btn btn-xs btn-outline">+ Fill to max</button>
+          <button id="ls-reset-steps" class="btn btn-xs btn-outline btn-error">Reset</button>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 mb-3 flex-wrap">
+        <button id="ls-start-btn" class="btn btn-sm btn-primary action-btn">
+          <i class="fa-solid fa-play"></i> Start
+        </button>
+        <button id="ls-pause-btn" class="btn btn-sm btn-warning action-btn" disabled>
+          <i class="fa-solid fa-pause"></i> Pause
+        </button>
+        <button id="ls-resume-btn" class="btn btn-sm btn-accent action-btn hidden">
+          <i class="fa-solid fa-forward"></i> Resume (next step)
+        </button>
+        <button id="ls-stop-btn" class="btn btn-sm btn-error action-btn" disabled>
+          <i class="fa-solid fa-stop"></i> Stop
+        </button>
+      </div>
+
+      <div id="ls-progress" class="text-xs text-slate-300 space-y-1 hidden">
+        <div id="ls-progress-line1"></div>
+        <div id="ls-progress-line2"></div>
+      </div>
+    </div>
+
     <div class="panel p-4">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
         <div>
@@ -385,6 +448,8 @@
       }
 
       updateScopeSuggestions();
+      lsTrackInMap(instances);
+      if (launchSeq.running) updateLsUI();
 
       instancesList.innerHTML = '';
       Object.entries(instances).forEach(([serverIp, clients]) => {
@@ -409,8 +474,9 @@
           const row = document.createElement('div');
           row.className = 'flex items-center justify-between bg-gray-800 rounded px-2 py-1 gap-2';
           const accountLabel = client.account ? ` <span class="text-xs text-gray-400">(${client.account})</span>` : '';
+          const emsBadge = client.enter_map_status ? ` <span class="badge badge-xs ${client.enter_map_status === 'complete' ? 'badge-success' : client.enter_map_status === 'failed' ? 'badge-error' : 'badge-warning'}">${client.enter_map_status}</span>` : '';
           const label = document.createElement('div');
-          label.innerHTML = `${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>`;
+          label.innerHTML = `${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>${emsBadge}`;
 
           const actions = document.createElement('div');
           actions.className = 'flex items-center gap-1 flex-wrap justify-end';
@@ -454,6 +520,14 @@
             sendMessage({ type: 'sqleave_client', character: client.character, machine: client.machine, account: client.account || null });
           });
 
+          const charSelectBtn = document.createElement('button');
+          charSelectBtn.className = 'btn btn-xs btn-outline';
+          charSelectBtn.textContent = 'Char Select';
+          charSelectBtn.addEventListener('click', () => {
+            setButtonPending(charSelectBtn, `charselect-${client.machine}-${client.character}-${client.account || ''}`, 1200);
+            sendMessage({ type: 'go_to_character_select_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
           const closeChar = document.createElement('button');
           closeChar.className = 'btn btn-xs btn-outline btn-error';
           closeChar.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
@@ -467,6 +541,7 @@
           actions.appendChild(fpsBtn);
           actions.appendChild(sqjoinBtn);
           actions.appendChild(sqleaveBtn);
+          actions.appendChild(charSelectBtn);
           actions.appendChild(closeChar);
           row.appendChild(label);
           row.appendChild(actions);
@@ -609,10 +684,11 @@
           const reasonLabel = client.leave_reason ? ` <span class="text-xs text-gray-400">Reason: ${client.leave_reason}</span>` : '';
           const lastServer = client.last_server_ip ? ` <span class="text-xs text-gray-400">Last: ${client.last_server_ip}</span>` : '';
           const reconnectStatus = client.reconnect_status ? ` <span class="text-xs text-gray-400">Status: ${client.reconnect_status}${client.reconnect_reason ? ` (${client.reconnect_reason})` : ''}</span>` : '';
+          const emsLabel = client.enter_map_status ? ` <span class="badge badge-xs ${client.enter_map_status === 'complete' ? 'badge-success' : client.enter_map_status === 'failed' ? 'badge-error' : 'badge-warning'}">${client.enter_map_status}${client.enter_map_reason ? ` (${client.enter_map_reason})` : ''}</span>` : '';
 
           const header = document.createElement('div');
           header.className = 'flex items-center justify-between gap-2';
-          header.innerHTML = `<div>${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>${lastServer}${reasonLabel}${reconnectStatus}</div>`;
+          header.innerHTML = `<div>${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>${lastServer}${reasonLabel}${reconnectStatus}${emsLabel}</div>`;
 
           const buttonGroup = document.createElement('div');
           buttonGroup.className = 'flex items-center gap-1';
@@ -695,12 +771,21 @@
             sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
           });
 
+          const enterMapBtn = document.createElement('button');
+          enterMapBtn.className = 'btn btn-xs btn-success';
+          enterMapBtn.textContent = 'Enter Map';
+          enterMapBtn.addEventListener('click', () => {
+            setButtonPending(enterMapBtn, `entermap-${client.machine}-${client.character}-${client.account || ''}`, 1500);
+            sendMessage({ type: 'enter_map_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+
           buttonGroup.appendChild(requestBtn);
           buttonGroup.appendChild(focusBtn);
           buttonGroup.appendChild(minimizeBtn);
           buttonGroup.appendChild(fpsBtn);
           buttonGroup.appendChild(sqjoinBtn);
           buttonGroup.appendChild(sqleaveBtn);
+          buttonGroup.appendChild(enterMapBtn);
           buttonGroup.appendChild(reconnectBtn);
           buttonGroup.appendChild(closeBtn);
           header.appendChild(buttonGroup);
@@ -860,6 +945,365 @@
       setButtonPending(event.currentTarget, 'request-status-unknown', 1200);
       sendMessage({ type: 'request_status_unknown', ...getScopePayload() });
     });
+
+    // ==================== Launch Sequence ====================
+
+    function clientKey(c) {
+      return `${c.machine}||${c.character}||${c.account || ''}`;
+    }
+
+    const defaultLsSteps = [
+      { type: 'fixed', count: 7 },
+      { type: 'fixed', count: 17 },
+      { type: 'fill' },
+      { type: 'fixed', count: 7 },
+      { type: 'fill' },
+    ];
+
+    const launchSeq = {
+      running: false,
+      paused: false,
+      pauseReason: null,
+      stepIndex: 0,
+      sentThisStep: 0,
+      baselineInstanceIps: new Set(),
+      settings: null,
+      steps: defaultLsSteps.map(s => ({ ...s })),
+      // Tracks clients sent go_to_character_select → use reconnect on re-entry
+      charSelectedClients: new Set(),
+      // Tracks when each client first appeared in instances during this run
+      inMapTimes: new Map(),
+      inMapClients: new Map(),
+      // Each entry is a timestamp at which we should fire a char_select
+      pendingCharSelectFires: [],
+      // Keys of clients already scheduled/sent char_select (prevent double-fire)
+      pendingCharSelectKeys: new Set(),
+      tickTimer: null,
+      csTimer: null,
+    };
+
+    function readLsSettings() {
+      return {
+        sendIntervalMs: Math.max(100, Number(document.getElementById('ls-send-interval').value) || 500),
+        checkDelayMs: Math.max(1000, (Number(document.getElementById('ls-check-delay').value) || 5) * 1000),
+        holdTimeMs: Math.max(1000, (Number(document.getElementById('ls-hold-time').value) || 60) * 1000),
+        overlapWindowMs: Math.max(500, (Number(document.getElementById('ls-overlap-window').value) || 8) * 1000),
+        instanceCapacity: Math.max(1, Number(document.getElementById('ls-instance-capacity').value) || 30),
+      };
+    }
+
+    function getLsStepTarget(step) {
+      if (step.type === 'fixed') return step.count;
+      const capacity = launchSeq.settings.instanceCapacity;
+      const totalOnMap = Object.values(lastStatus.instances || {}).reduce((s, c) => s + c.length, 0);
+      return Math.max(0, capacity - totalOnMap);
+    }
+
+    function buildEnterQueue() {
+      const outside = (lastStatus.outside || []).filter(c => c.character && c.machine);
+      const fresh = outside.filter(c => !launchSeq.charSelectedClients.has(clientKey(c)));
+      const returning = outside.filter(c => launchSeq.charSelectedClients.has(clientKey(c)));
+      return [
+        ...fresh.map(c => ({ ...c, useReconnect: false })),
+        ...returning.map(c => ({ ...c, useReconnect: true })),
+      ];
+    }
+
+    function startLaunchSequence() {
+      launchSeq.running = true;
+      launchSeq.paused = false;
+      launchSeq.pauseReason = null;
+      launchSeq.stepIndex = 0;
+      launchSeq.sentThisStep = 0;
+      launchSeq.baselineInstanceIps = new Set(Object.keys(lastStatus.instances || {}));
+      launchSeq.settings = readLsSettings();
+      launchSeq.charSelectedClients = new Set();
+      launchSeq.inMapTimes = new Map();
+      launchSeq.inMapClients = new Map();
+      launchSeq.pendingCharSelectFires = [];
+      launchSeq.pendingCharSelectKeys = new Set();
+      updateLsUI();
+      lsTick();
+      startLsCsTimer();
+    }
+
+    function pauseLaunchSequence(reason) {
+      launchSeq.paused = true;
+      launchSeq.pauseReason = reason || 'Paused';
+      if (launchSeq.tickTimer) { clearTimeout(launchSeq.tickTimer); launchSeq.tickTimer = null; }
+      updateLsUI();
+    }
+
+    function resumeLaunchSequence() {
+      if (!launchSeq.running || !launchSeq.paused) return;
+      launchSeq.paused = false;
+      launchSeq.pauseReason = null;
+      launchSeq.stepIndex++;
+      launchSeq.sentThisStep = 0;
+      launchSeq.baselineInstanceIps = new Set(Object.keys(lastStatus.instances || {}));
+      updateLsUI();
+      if (launchSeq.stepIndex >= launchSeq.steps.length) {
+        stopLaunchSequence('All steps complete');
+        return;
+      }
+      lsTick();
+    }
+
+    function stopLaunchSequence(reason) {
+      launchSeq.running = false;
+      launchSeq.paused = false;
+      launchSeq.pauseReason = reason || null;
+      if (launchSeq.tickTimer) { clearTimeout(launchSeq.tickTimer); launchSeq.tickTimer = null; }
+      if (launchSeq.csTimer) { clearInterval(launchSeq.csTimer); launchSeq.csTimer = null; }
+      updateLsUI();
+    }
+
+    function lsTick() {
+      if (!launchSeq.running || launchSeq.paused) return;
+
+      const step = launchSeq.steps[launchSeq.stepIndex];
+      if (!step) { stopLaunchSequence('All steps complete'); return; }
+
+      const target = getLsStepTarget(step);
+
+      if (launchSeq.sentThisStep >= target) {
+        // Step sends done — wait check delay then evaluate instance count
+        launchSeq.tickTimer = setTimeout(lsEvaluateStep, launchSeq.settings.checkDelayMs);
+        return;
+      }
+
+      const queue = buildEnterQueue();
+      if (queue.length === 0) {
+        pauseLaunchSequence('No clients available in outside list');
+        return;
+      }
+
+      const client = queue[0];
+      const cmd = client.useReconnect ? 'reconnect_client' : 'enter_map_client';
+      sendMessage({ type: cmd, character: client.character, machine: client.machine, account: client.account || null });
+      launchSeq.sentThisStep++;
+
+      // Schedule a char_select firing after the overlap window elapses
+      launchSeq.pendingCharSelectFires.push(Date.now() + launchSeq.settings.overlapWindowMs);
+      launchSeq.pendingCharSelectFires.sort((a, b) => a - b);
+
+      updateLsUI();
+      launchSeq.tickTimer = setTimeout(lsTick, launchSeq.settings.sendIntervalMs);
+    }
+
+    function lsEvaluateStep() {
+      const currentIps = new Set(Object.keys(lastStatus.instances || {}));
+      const newIps = [...currentIps].filter(ip => !launchSeq.baselineInstanceIps.has(ip));
+
+      if (newIps.length > 0) {
+        pauseLaunchSequence(`New instance detected (${newIps[0]}) — resume to continue to step ${launchSeq.stepIndex + 2}`);
+        return;
+      }
+
+      // No new instance — auto-advance to next step
+      launchSeq.stepIndex++;
+      launchSeq.sentThisStep = 0;
+      launchSeq.baselineInstanceIps = currentIps;
+
+      if (launchSeq.stepIndex >= launchSeq.steps.length) {
+        stopLaunchSequence('All steps complete');
+        return;
+      }
+
+      updateLsUI();
+      lsTick();
+    }
+
+    function startLsCsTimer() {
+      if (launchSeq.csTimer) return;
+      launchSeq.csTimer = setInterval(lsProcessCsQueue, 500);
+    }
+
+    function lsProcessCsQueue() {
+      if (!launchSeq.running) return;
+      const now = Date.now();
+      while (launchSeq.pendingCharSelectFires.length > 0 && launchSeq.pendingCharSelectFires[0] <= now) {
+        launchSeq.pendingCharSelectFires.shift();
+        lsSendCharSelectToOldest();
+      }
+    }
+
+    function lsSendCharSelectToOldest() {
+      const holdCutoff = Date.now() - launchSeq.settings.holdTimeMs;
+      let oldestKey = null;
+      let oldestTime = Infinity;
+
+      for (const [key, enteredAt] of launchSeq.inMapTimes.entries()) {
+        if (enteredAt <= holdCutoff && enteredAt < oldestTime && !launchSeq.pendingCharSelectKeys.has(key)) {
+          oldestKey = key;
+          oldestTime = enteredAt;
+        }
+      }
+
+      if (!oldestKey) return; // No eligible client (hold time not yet elapsed for any)
+
+      const client = launchSeq.inMapClients.get(oldestKey);
+      if (!client) return;
+
+      sendMessage({ type: 'go_to_character_select_client', character: client.character, machine: client.machine, account: client.account || null });
+      launchSeq.charSelectedClients.add(oldestKey);
+      launchSeq.pendingCharSelectKeys.add(oldestKey);
+    }
+
+    function lsTrackInMap(instances) {
+      if (!launchSeq.running) return;
+      const currentKeys = new Set();
+      for (const clients of Object.values(instances)) {
+        for (const client of clients) {
+          const key = clientKey(client);
+          currentKeys.add(key);
+          if (!launchSeq.inMapTimes.has(key)) {
+            launchSeq.inMapTimes.set(key, Date.now());
+            launchSeq.inMapClients.set(key, client);
+          }
+        }
+      }
+      // Clean up clients no longer on any map
+      for (const key of launchSeq.inMapTimes.keys()) {
+        if (!currentKeys.has(key)) {
+          launchSeq.inMapTimes.delete(key);
+          launchSeq.inMapClients.delete(key);
+          launchSeq.pendingCharSelectKeys.delete(key);
+        }
+      }
+    }
+
+    function updateLsUI() {
+      const badge = document.getElementById('ls-status-badge');
+      const startBtn = document.getElementById('ls-start-btn');
+      const pauseBtn = document.getElementById('ls-pause-btn');
+      const resumeBtn = document.getElementById('ls-resume-btn');
+      const stopBtn = document.getElementById('ls-stop-btn');
+      const progress = document.getElementById('ls-progress');
+      const line1 = document.getElementById('ls-progress-line1');
+      const line2 = document.getElementById('ls-progress-line2');
+
+      if (!launchSeq.running) {
+        badge.textContent = launchSeq.pauseReason || 'Idle';
+        badge.className = 'badge badge-ghost text-xs self-start sm:self-auto';
+        startBtn.disabled = false;
+        pauseBtn.disabled = true;
+        pauseBtn.classList.remove('hidden');
+        resumeBtn.classList.add('hidden');
+        stopBtn.disabled = true;
+        progress.classList.add('hidden');
+        return;
+      }
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+
+      if (launchSeq.paused) {
+        badge.textContent = launchSeq.pauseReason || 'Paused';
+        badge.className = 'badge badge-warning text-xs self-start sm:self-auto';
+        pauseBtn.classList.add('hidden');
+        resumeBtn.classList.remove('hidden');
+      } else {
+        badge.textContent = `Running — Step ${launchSeq.stepIndex + 1}/${launchSeq.steps.length}`;
+        badge.className = 'badge badge-success text-xs self-start sm:self-auto';
+        pauseBtn.disabled = false;
+        pauseBtn.classList.remove('hidden');
+        resumeBtn.classList.add('hidden');
+      }
+
+      progress.classList.remove('hidden');
+      const step = launchSeq.steps[launchSeq.stepIndex];
+      const stepLabel = step ? (step.type === 'fill' ? 'Fill to max' : `Send ${step.count}`) : '—';
+      line1.textContent = `Step ${launchSeq.stepIndex + 1}/${launchSeq.steps.length}: ${stepLabel} — Sent this step: ${launchSeq.sentThisStep}`;
+      const instanceIps = Object.keys(lastStatus.instances || {});
+      const totalOnMap = Object.values(lastStatus.instances || {}).reduce((s, c) => s + c.length, 0);
+      const pendingCs = launchSeq.pendingCharSelectFires.length;
+      line2.textContent = `Instances: ${instanceIps.length} (${instanceIps.join(', ') || 'none'}) · On map: ${totalOnMap} · Char-selected: ${launchSeq.charSelectedClients.size} · CS pending: ${pendingCs}`;
+    }
+
+    // Step list rendering
+    function renderLsSteps() {
+      const container = document.getElementById('ls-steps-list');
+      container.innerHTML = '';
+      if (launchSeq.steps.length === 0) {
+        container.innerHTML = '<span class="text-xs text-slate-500">No steps — add some below</span>';
+        return;
+      }
+      launchSeq.steps.forEach((step, i) => {
+        const chip = document.createElement('div');
+        chip.className = 'flex items-center gap-1 bg-gray-700 rounded px-2 py-1 text-xs';
+
+        if (step.type === 'fill') {
+          chip.innerHTML = `<span class="text-slate-300">Fill to max</span>`;
+        } else {
+          const lbl = document.createElement('span');
+          lbl.className = 'text-slate-400';
+          lbl.textContent = 'Send';
+          const inp = document.createElement('input');
+          inp.type = 'number';
+          inp.value = step.count;
+          inp.min = 1;
+          inp.max = 1000;
+          inp.className = 'w-14 bg-gray-800 rounded px-1 text-center border border-gray-600';
+          inp.addEventListener('change', () => {
+            launchSeq.steps[i].count = Math.max(1, Number(inp.value) || 1);
+          });
+          chip.appendChild(lbl);
+          chip.appendChild(inp);
+        }
+
+        const stepNum = document.createElement('span');
+        stepNum.className = 'text-slate-600 ml-1';
+        stepNum.textContent = `#${i + 1}`;
+        chip.appendChild(stepNum);
+
+        const rm = document.createElement('button');
+        rm.className = 'ml-1 text-slate-500 hover:text-rose-400 leading-none';
+        rm.textContent = '×';
+        rm.addEventListener('click', () => {
+          launchSeq.steps.splice(i, 1);
+          renderLsSteps();
+        });
+        chip.appendChild(rm);
+        container.appendChild(chip);
+      });
+    }
+
+    document.getElementById('ls-add-fixed').addEventListener('click', () => {
+      launchSeq.steps.push({ type: 'fixed', count: 7 });
+      renderLsSteps();
+    });
+
+    document.getElementById('ls-add-fill').addEventListener('click', () => {
+      launchSeq.steps.push({ type: 'fill' });
+      renderLsSteps();
+    });
+
+    document.getElementById('ls-reset-steps').addEventListener('click', () => {
+      launchSeq.steps = defaultLsSteps.map(s => ({ ...s }));
+      renderLsSteps();
+    });
+
+    document.getElementById('ls-start-btn').addEventListener('click', () => {
+      if (launchSeq.steps.length === 0) return;
+      startLaunchSequence();
+    });
+
+    document.getElementById('ls-pause-btn').addEventListener('click', () => {
+      pauseLaunchSequence('Manually paused');
+    });
+
+    document.getElementById('ls-resume-btn').addEventListener('click', () => {
+      resumeLaunchSequence();
+    });
+
+    document.getElementById('ls-stop-btn').addEventListener('click', () => {
+      stopLaunchSequence('Stopped');
+    });
+
+    renderLsSteps();
+
+    // ==================== End Launch Sequence ====================
 
     connect();
     startStatusPolling();
