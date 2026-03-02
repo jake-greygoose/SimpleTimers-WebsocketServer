@@ -236,7 +236,10 @@
 
       <div class="flex items-center gap-2 mb-3 flex-wrap">
         <button id="ls-start-btn" class="btn btn-sm btn-primary action-btn">
-          <i class="fa-solid fa-play"></i> Start
+          <i class="fa-solid fa-play"></i> Start Steps
+        </button>
+        <button id="ls-flood-btn" class="btn btn-sm btn-secondary action-btn">
+          <i class="fa-solid fa-bolt"></i> Flood
         </button>
         <button id="ls-pause-btn" class="btn btn-sm btn-warning action-btn" disabled>
           <i class="fa-solid fa-pause"></i> Pause
@@ -252,6 +255,7 @@
       <div id="ls-progress" class="text-xs text-slate-300 space-y-1 hidden">
         <div id="ls-progress-line1"></div>
         <div id="ls-progress-line2"></div>
+        <div id="ls-progress-line3"></div>
       </div>
     </div>
 
@@ -961,6 +965,7 @@
     ];
 
     const launchSeq = {
+      mode: null,       // 'steps' | 'flood'
       running: false,
       paused: false,
       pauseReason: null,
@@ -974,9 +979,11 @@
       // Tracks when each client first appeared in instances during this run
       inMapTimes: new Map(),
       inMapClients: new Map(),
-      // Each entry is a timestamp at which we should fire a char_select
+      // Each entry: { fireAt: number, target: {key, client} | null }
+      // target=null → pick oldest eligible (steps mode)
+      // target set  → send to that specific client (flood mode)
       pendingCharSelectFires: [],
-      // Keys of clients already scheduled/sent char_select (prevent double-fire)
+      // Keys already scheduled for char_select (prevent double-fire)
       pendingCharSelectKeys: new Set(),
       tickTimer: null,
       csTimer: null,
@@ -1009,21 +1016,47 @@
       ];
     }
 
-    function startLaunchSequence() {
-      launchSeq.running = true;
-      launchSeq.paused = false;
-      launchSeq.pauseReason = null;
+    function lsResetState() {
       launchSeq.stepIndex = 0;
       launchSeq.sentThisStep = 0;
       launchSeq.baselineInstanceIps = new Set(Object.keys(lastStatus.instances || {}));
-      launchSeq.settings = readLsSettings();
       launchSeq.charSelectedClients = new Set();
       launchSeq.inMapTimes = new Map();
       launchSeq.inMapClients = new Map();
       launchSeq.pendingCharSelectFires = [];
       launchSeq.pendingCharSelectKeys = new Set();
+    }
+
+    function startLaunchSequence() {
+      launchSeq.mode = 'steps';
+      launchSeq.running = true;
+      launchSeq.paused = false;
+      launchSeq.pauseReason = null;
+      launchSeq.settings = readLsSettings();
+      lsResetState();
       updateLsUI();
       lsTick();
+      startLsCsTimer();
+    }
+
+    function startFloodMode() {
+      const wasRunning = launchSeq.running;
+      if (launchSeq.tickTimer) { clearTimeout(launchSeq.tickTimer); launchSeq.tickTimer = null; }
+      launchSeq.mode = 'flood';
+      launchSeq.running = true;
+      launchSeq.paused = false;
+      launchSeq.pauseReason = null;
+      launchSeq.settings = readLsSettings();
+      // Transitioning from steps — preserve charSelectedClients and inMapTimes
+      // so the rotation carries over correctly
+      if (!wasRunning) {
+        lsResetState();
+      } else {
+        launchSeq.pendingCharSelectFires = [];
+        launchSeq.pendingCharSelectKeys = new Set();
+      }
+      updateLsUI();
+      floodTick();
       startLsCsTimer();
     }
 
@@ -1038,6 +1071,7 @@
       if (!launchSeq.running || !launchSeq.paused) return;
       launchSeq.paused = false;
       launchSeq.pauseReason = null;
+      // Resume only applies to step mode — advance past the paused step
       launchSeq.stepIndex++;
       launchSeq.sentThisStep = 0;
       launchSeq.baselineInstanceIps = new Set(Object.keys(lastStatus.instances || {}));
@@ -1052,14 +1086,17 @@
     function stopLaunchSequence(reason) {
       launchSeq.running = false;
       launchSeq.paused = false;
+      launchSeq.mode = null;
       launchSeq.pauseReason = reason || null;
       if (launchSeq.tickTimer) { clearTimeout(launchSeq.tickTimer); launchSeq.tickTimer = null; }
       if (launchSeq.csTimer) { clearInterval(launchSeq.csTimer); launchSeq.csTimer = null; }
       updateLsUI();
     }
 
+    // ---- Steps mode tick ----
+
     function lsTick() {
-      if (!launchSeq.running || launchSeq.paused) return;
+      if (!launchSeq.running || launchSeq.paused || launchSeq.mode !== 'steps') return;
 
       const step = launchSeq.steps[launchSeq.stepIndex];
       if (!step) { stopLaunchSequence('All steps complete'); return; }
@@ -1067,7 +1104,6 @@
       const target = getLsStepTarget(step);
 
       if (launchSeq.sentThisStep >= target) {
-        // Step sends done — wait check delay then evaluate instance count
         launchSeq.tickTimer = setTimeout(lsEvaluateStep, launchSeq.settings.checkDelayMs);
         return;
       }
@@ -1083,9 +1119,9 @@
       sendMessage({ type: cmd, character: client.character, machine: client.machine, account: client.account || null });
       launchSeq.sentThisStep++;
 
-      // Schedule a char_select firing after the overlap window elapses
-      launchSeq.pendingCharSelectFires.push(Date.now() + launchSeq.settings.overlapWindowMs);
-      launchSeq.pendingCharSelectFires.sort((a, b) => a - b);
+      // Schedule oldest-eligible char_select after overlap window (steps mode)
+      launchSeq.pendingCharSelectFires.push({ fireAt: Date.now() + launchSeq.settings.overlapWindowMs, target: null });
+      launchSeq.pendingCharSelectFires.sort((a, b) => a.fireAt - b.fireAt);
 
       updateLsUI();
       launchSeq.tickTimer = setTimeout(lsTick, launchSeq.settings.sendIntervalMs);
@@ -1100,7 +1136,6 @@
         return;
       }
 
-      // No new instance — auto-advance to next step
       launchSeq.stepIndex++;
       launchSeq.sentThisStep = 0;
       launchSeq.baselineInstanceIps = currentIps;
@@ -1114,6 +1149,49 @@
       lsTick();
     }
 
+    // ---- Flood mode tick ----
+
+    function floodTick() {
+      if (!launchSeq.running || launchSeq.paused || launchSeq.mode !== 'flood') return;
+
+      const queue = buildEnterQueue();
+      if (queue.length > 0) {
+        const client = queue[0];
+        const cmd = client.useReconnect ? 'reconnect_client' : 'enter_map_client';
+        sendMessage({ type: cmd, character: client.character, machine: client.machine, account: client.account || null });
+        updateLsUI();
+      }
+
+      launchSeq.tickTimer = setTimeout(floodTick, launchSeq.settings.sendIntervalMs);
+    }
+
+    // Check every instance against capacity and schedule targeted char selects
+    // for the oldest client on any over-capacity instance
+    function lsCheckInstanceCaps() {
+      const capacity = launchSeq.settings.instanceCapacity;
+      for (const [ip, clients] of Object.entries(lastStatus.instances || {})) {
+        if (clients.length <= capacity) continue;
+        let oldestKey = null;
+        let oldestTime = Infinity;
+        for (const client of clients) {
+          const key = clientKey(client);
+          const enteredAt = launchSeq.inMapTimes.get(key);
+          if (enteredAt && enteredAt < oldestTime && !launchSeq.pendingCharSelectKeys.has(key)) {
+            oldestKey = key;
+            oldestTime = enteredAt;
+          }
+        }
+        if (!oldestKey) continue;
+        const target = { key: oldestKey, client: launchSeq.inMapClients.get(oldestKey) };
+        if (!target.client) continue;
+        launchSeq.pendingCharSelectFires.push({ fireAt: Date.now() + launchSeq.settings.overlapWindowMs, target });
+        launchSeq.pendingCharSelectFires.sort((a, b) => a.fireAt - b.fireAt);
+        launchSeq.pendingCharSelectKeys.add(oldestKey);
+      }
+    }
+
+    // ---- Shared char select processing ----
+
     function startLsCsTimer() {
       if (launchSeq.csTimer) return;
       launchSeq.csTimer = setInterval(lsProcessCsQueue, 500);
@@ -1122,10 +1200,21 @@
     function lsProcessCsQueue() {
       if (!launchSeq.running) return;
       const now = Date.now();
-      while (launchSeq.pendingCharSelectFires.length > 0 && launchSeq.pendingCharSelectFires[0] <= now) {
-        launchSeq.pendingCharSelectFires.shift();
-        lsSendCharSelectToOldest();
+      while (launchSeq.pendingCharSelectFires.length > 0 && launchSeq.pendingCharSelectFires[0].fireAt <= now) {
+        const entry = launchSeq.pendingCharSelectFires.shift();
+        if (entry.target) {
+          lsSendCharSelectTo(entry.target);
+        } else {
+          lsSendCharSelectToOldest();
+        }
       }
+    }
+
+    function lsSendCharSelectTo({ key, client }) {
+      if (!client) return;
+      sendMessage({ type: 'go_to_character_select_client', character: client.character, machine: client.machine, account: client.account || null });
+      launchSeq.charSelectedClients.add(key);
+      // pendingCharSelectKeys already set at schedule time
     }
 
     function lsSendCharSelectToOldest() {
@@ -1140,7 +1229,7 @@
         }
       }
 
-      if (!oldestKey) return; // No eligible client (hold time not yet elapsed for any)
+      if (!oldestKey) return;
 
       const client = launchSeq.inMapClients.get(oldestKey);
       if (!client) return;
@@ -1163,7 +1252,6 @@
           }
         }
       }
-      // Clean up clients no longer on any map
       for (const key of launchSeq.inMapTimes.keys()) {
         if (!currentKeys.has(key)) {
           launchSeq.inMapTimes.delete(key);
@@ -1171,22 +1259,28 @@
           launchSeq.pendingCharSelectKeys.delete(key);
         }
       }
+      if (launchSeq.mode === 'flood') {
+        lsCheckInstanceCaps();
+      }
     }
 
     function updateLsUI() {
       const badge = document.getElementById('ls-status-badge');
       const startBtn = document.getElementById('ls-start-btn');
+      const floodBtn = document.getElementById('ls-flood-btn');
       const pauseBtn = document.getElementById('ls-pause-btn');
       const resumeBtn = document.getElementById('ls-resume-btn');
       const stopBtn = document.getElementById('ls-stop-btn');
       const progress = document.getElementById('ls-progress');
       const line1 = document.getElementById('ls-progress-line1');
       const line2 = document.getElementById('ls-progress-line2');
+      const line3 = document.getElementById('ls-progress-line3');
 
       if (!launchSeq.running) {
         badge.textContent = launchSeq.pauseReason || 'Idle';
         badge.className = 'badge badge-ghost text-xs self-start sm:self-auto';
         startBtn.disabled = false;
+        floodBtn.disabled = false;
         pauseBtn.disabled = true;
         pauseBtn.classList.remove('hidden');
         resumeBtn.classList.add('hidden');
@@ -1203,22 +1297,52 @@
         badge.className = 'badge badge-warning text-xs self-start sm:self-auto';
         pauseBtn.classList.add('hidden');
         resumeBtn.classList.remove('hidden');
+        floodBtn.disabled = false; // can jump to flood while paused
+      } else if (launchSeq.mode === 'flood') {
+        badge.textContent = 'Flooding';
+        badge.className = 'badge badge-secondary text-xs self-start sm:self-auto';
+        pauseBtn.disabled = false;
+        pauseBtn.classList.remove('hidden');
+        resumeBtn.classList.add('hidden');
+        floodBtn.disabled = true;
       } else {
-        badge.textContent = `Running — Step ${launchSeq.stepIndex + 1}/${launchSeq.steps.length}`;
+        badge.textContent = `Steps — ${launchSeq.stepIndex + 1}/${launchSeq.steps.length}`;
         badge.className = 'badge badge-success text-xs self-start sm:self-auto';
         pauseBtn.disabled = false;
         pauseBtn.classList.remove('hidden');
         resumeBtn.classList.add('hidden');
+        floodBtn.disabled = false; // can jump to flood mid-steps
       }
 
       progress.classList.remove('hidden');
-      const step = launchSeq.steps[launchSeq.stepIndex];
-      const stepLabel = step ? (step.type === 'fill' ? 'Fill to max' : `Send ${step.count}`) : '—';
-      line1.textContent = `Step ${launchSeq.stepIndex + 1}/${launchSeq.steps.length}: ${stepLabel} — Sent this step: ${launchSeq.sentThisStep}`;
-      const instanceIps = Object.keys(lastStatus.instances || {});
-      const totalOnMap = Object.values(lastStatus.instances || {}).reduce((s, c) => s + c.length, 0);
+      const instances = lastStatus.instances || {};
+      const instanceIps = Object.keys(instances);
+      const totalOnMap = instanceIps.reduce((s, ip) => s + instances[ip].length, 0);
       const pendingCs = launchSeq.pendingCharSelectFires.length;
-      line2.textContent = `Instances: ${instanceIps.length} (${instanceIps.join(', ') || 'none'}) · On map: ${totalOnMap} · Char-selected: ${launchSeq.charSelectedClients.size} · CS pending: ${pendingCs}`;
+      const capacity = launchSeq.settings ? launchSeq.settings.instanceCapacity : '?';
+
+      if (launchSeq.mode === 'steps') {
+        const step = launchSeq.steps[launchSeq.stepIndex];
+        const stepLabel = step ? (step.type === 'fill' ? 'Fill to max' : `Send ${step.count}`) : '—';
+        line1.textContent = `Step ${launchSeq.stepIndex + 1}/${launchSeq.steps.length}: ${stepLabel} · Sent this step: ${launchSeq.sentThisStep}`;
+      } else {
+        const outsideCount = (lastStatus.outside || []).length;
+        line1.textContent = `Flood · Outside: ${outsideCount} · Char-selected: ${launchSeq.charSelectedClients.size} · CS pending: ${pendingCs}`;
+      }
+
+      // Per-instance breakdown
+      if (instanceIps.length > 0) {
+        const breakdown = instanceIps.map(ip => `${ip} (${instances[ip].length}/${capacity})`).join(' · ');
+        line2.textContent = `On map: ${totalOnMap} · ${breakdown}`;
+      } else {
+        line2.textContent = `On map: 0 · No instances yet`;
+      }
+
+      if (launchSeq.mode === 'steps') {
+        line3.textContent = `Char-selected: ${launchSeq.charSelectedClients.size} · CS pending: ${pendingCs}`;
+      } else {
+        line3.textContent = '';
+      }
     }
 
     // Step list rendering
@@ -1287,6 +1411,10 @@
     document.getElementById('ls-start-btn').addEventListener('click', () => {
       if (launchSeq.steps.length === 0) return;
       startLaunchSequence();
+    });
+
+    document.getElementById('ls-flood-btn').addEventListener('click', () => {
+      startFloodMode();
     });
 
     document.getElementById('ls-pause-btn').addEventListener('click', () => {
