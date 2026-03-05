@@ -473,29 +473,61 @@
         container.className = 'bg-gray-700 rounded p-3';
 
         const header = document.createElement('div');
-        header.className = 'flex items-center justify-between gap-2 mb-2';
+        header.className = 'flex items-center justify-between gap-2 mb-2 flex-wrap';
         header.innerHTML = `<div><span class="font-semibold mono">${serverIp}</span> <span class="text-xs text-gray-300">(${clients.length})</span></div>`;
+
+        const headerActions = document.createElement('div');
+        headerActions.className = 'flex items-center gap-2 flex-wrap justify-end';
+
+        const charSelectAllLabel = document.createElement('label');
+        charSelectAllLabel.className = 'text-xs text-gray-400';
+        charSelectAllLabel.textContent = 'Keep:';
+
+        const keepCountInput = document.createElement('input');
+        keepCountInput.type = 'number';
+        keepCountInput.min = '0';
+        keepCountInput.max = String(clients.length);
+        keepCountInput.value = '5';
+        keepCountInput.className = 'input input-bordered input-xs bg-gray-800 w-14 text-center';
+
+        const charSelectAllBtn = document.createElement('button');
+        charSelectAllBtn.className = 'btn btn-xs btn-secondary';
+        charSelectAllBtn.textContent = 'Char Select Rest';
+        charSelectAllBtn.addEventListener('click', () => {
+          const keep = Math.max(0, parseInt(keepCountInput.value) || 0);
+          const toSelect = clients.slice(keep);
+          if (toSelect.length === 0) return;
+          toSelect.forEach(client => {
+            sendMessage({ type: 'go_to_character_select_client', character: client.character, machine: client.machine, account: client.account || null });
+          });
+          setButtonPending(charSelectAllBtn, `charselect-all-${serverIp}`, 1200);
+        });
 
         const closeBtn = document.createElement('button');
         closeBtn.className = 'btn btn-xs btn-warning';
         closeBtn.textContent = 'Close Instance';
         closeBtn.addEventListener('click', () => sendMessage({ type: 'close_server', server_ip: serverIp }));
 
-        header.appendChild(closeBtn);
+        headerActions.appendChild(charSelectAllLabel);
+        headerActions.appendChild(keepCountInput);
+        headerActions.appendChild(charSelectAllBtn);
+        headerActions.appendChild(closeBtn);
+        header.appendChild(headerActions);
         container.appendChild(header);
 
         const list = document.createElement('div');
         list.className = 'space-y-1 text-sm';
         clients.forEach(client => {
           const row = document.createElement('div');
-          row.className = 'flex items-center justify-between bg-gray-800 rounded px-2 py-1 gap-2';
+          row.className = 'bg-gray-800 rounded px-2 py-2 flex flex-col gap-1';
           const accountLabel = client.account ? ` <span class="text-xs text-gray-400">(${client.account})</span>` : '';
           const emsBadge = client.enter_map_status ? ` <span class="badge badge-xs ${client.enter_map_status === 'complete' ? 'badge-success' : client.enter_map_status === 'failed' ? 'badge-error' : 'badge-warning'}">${client.enter_map_status}</span>` : '';
           const label = document.createElement('div');
-          label.innerHTML = `${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>${emsBadge}`;
+          label.className = 'leading-snug';
+          label.innerHTML = `<span class="font-medium">${client.character}</span>${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>${emsBadge}`;
 
           const actions = document.createElement('div');
-          actions.className = 'flex items-center gap-1 flex-wrap justify-end';
+          actions.className = 'flex flex-wrap gap-1';
 
           const focusBtn = document.createElement('button');
           focusBtn.className = 'btn btn-xs';
@@ -523,7 +555,7 @@
 
           const sqjoinBtn = document.createElement('button');
           sqjoinBtn.className = 'btn btn-xs btn-accent';
-          sqjoinBtn.textContent = 'Send Join';
+          sqjoinBtn.textContent = 'Join Squad';
           sqjoinBtn.addEventListener('click', () => {
             openSqjoinModal({ character: client.character, machine: client.machine, account: client.account || null });
           });
@@ -545,8 +577,8 @@
           });
 
           const closeChar = document.createElement('button');
-          closeChar.className = 'btn btn-xs btn-outline btn-error';
-          closeChar.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
+          closeChar.className = 'btn btn-xs btn-error';
+          closeChar.textContent = 'Close';
           closeChar.addEventListener('click', () => {
             setButtonPending(closeChar, `close-${client.machine}-${client.character}-${client.account || ''}`, 800);
             sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
@@ -609,13 +641,14 @@
         list.className = 'space-y-1 text-sm';
         clients.forEach(client => {
           const row = document.createElement('div');
-          row.className = 'flex items-center justify-between bg-gray-800 rounded px-2 py-1 gap-2';
+          row.className = 'bg-gray-800 rounded px-2 py-2 flex flex-col gap-1';
           const accountLabel = client.account ? ` <span class="text-xs text-gray-400">(${client.account})</span>` : '';
           const label = document.createElement('div');
-          label.innerHTML = `${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.server_ip || 'unknown'}</span>`;
+          label.className = 'leading-snug';
+          label.innerHTML = `<span class="font-medium">${client.character}</span>${accountLabel} <span class="text-xs text-gray-400">@ ${client.server_ip || 'unknown'}</span>`;
 
           const actions = document.createElement('div');
-          actions.className = 'flex items-center gap-1 flex-wrap justify-end';
+          actions.className = 'flex flex-wrap gap-1';
 
           const focusBtn = document.createElement('button');
           focusBtn.className = 'btn btn-xs';
@@ -643,7 +676,7 @@
 
           const sqjoinBtn = document.createElement('button');
           sqjoinBtn.className = 'btn btn-xs btn-accent';
-          sqjoinBtn.textContent = 'Send Join';
+          sqjoinBtn.textContent = 'Join Squad';
           sqjoinBtn.addEventListener('click', () => {
             openSqjoinModal({ character: client.character, machine: client.machine, account: client.account || null });
           });
@@ -657,8 +690,8 @@
           });
 
           const closeChar = document.createElement('button');
-          closeChar.className = 'btn btn-xs btn-outline btn-error';
-          closeChar.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
+          closeChar.className = 'btn btn-xs btn-error';
+          closeChar.textContent = 'Close';
           closeChar.addEventListener('click', () => {
             setButtonPending(closeChar, `close-${client.machine}-${client.character}-${client.account || ''}`, 800);
             sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
@@ -694,20 +727,22 @@
         document.getElementById('reconnect-outside-btn').classList.remove('btn-disabled');
         outside.forEach(client => {
           const container = document.createElement('div');
-          container.className = 'bg-gray-700 rounded p-3';
+          container.className = 'bg-gray-700 rounded p-3 flex flex-col gap-1.5';
 
           const accountLabel = client.account ? ` <span class="text-xs text-gray-400">(${client.account})</span>` : '';
-          const reasonLabel = client.leave_reason ? ` <span class="text-xs text-gray-400">Reason: ${client.leave_reason}</span>` : '';
-          const lastServer = client.last_server_ip ? ` <span class="text-xs text-gray-400">Last: ${client.last_server_ip}</span>` : '';
-          const reconnectStatus = client.reconnect_status ? ` <span class="text-xs text-gray-400">Status: ${client.reconnect_status}${client.reconnect_reason ? ` (${client.reconnect_reason})` : ''}</span>` : '';
           const emsLabel = client.enter_map_status ? ` <span class="badge badge-xs ${client.enter_map_status === 'complete' ? 'badge-success' : client.enter_map_status === 'failed' ? 'badge-error' : 'badge-warning'}">${client.enter_map_status}${client.enter_map_reason ? ` (${client.enter_map_reason})` : ''}</span>` : '';
 
-          const header = document.createElement('div');
-          header.className = 'flex items-center justify-between gap-2';
-          header.innerHTML = `<div>${client.character}${accountLabel} <span class="text-xs text-gray-400">@ ${client.machine}</span>${lastServer}${reasonLabel}${reconnectStatus}${emsLabel}</div>`;
+          const primaryInfo = document.createElement('div');
+          primaryInfo.className = 'text-sm leading-snug';
+          primaryInfo.innerHTML = `<span class="font-medium">${client.character}</span>${accountLabel} <span class="text-gray-400">@ ${client.machine}</span>${emsLabel}`;
+
+          const metaParts = [];
+          if (client.last_server_ip) metaParts.push(`Last: ${client.last_server_ip}`);
+          if (client.leave_reason) metaParts.push(`Reason: ${client.leave_reason}`);
+          if (client.reconnect_status) metaParts.push(`Status: ${client.reconnect_status}${client.reconnect_reason ? ` (${client.reconnect_reason})` : ''}`);
 
           const buttonGroup = document.createElement('div');
-          buttonGroup.className = 'flex items-center gap-1';
+          buttonGroup.className = 'flex flex-wrap gap-1';
 
           const focusBtn = document.createElement('button');
           focusBtn.className = 'btn btn-xs';
@@ -735,7 +770,7 @@
 
           const sqjoinBtn = document.createElement('button');
           sqjoinBtn.className = 'btn btn-xs btn-accent';
-          sqjoinBtn.textContent = 'Send Join';
+          sqjoinBtn.textContent = 'Join Squad';
           sqjoinBtn.addEventListener('click', () => {
             openSqjoinModal({ character: client.character, machine: client.machine, account: client.account || null });
           });
@@ -758,30 +793,20 @@
           }
           reconnectBtn.addEventListener('click', () => {
             setButtonPending(reconnectBtn, `reconnect-${client.machine}-${client.character}-${client.account || ''}`, 1500);
-            sendMessage({
-              type: 'reconnect_client',
-              character: client.character,
-              machine: client.machine,
-            account: client.account || null
+            sendMessage({ type: 'reconnect_client', character: client.character, machine: client.machine, account: client.account || null });
           });
-        });
 
           const requestBtn = document.createElement('button');
           requestBtn.className = 'btn btn-xs';
           requestBtn.textContent = 'Request Update';
           requestBtn.addEventListener('click', () => {
             setButtonPending(requestBtn, `request-${client.machine}-${client.character}-${client.account || ''}`, 1200);
-            sendMessage({
-              type: 'request_status_client',
-              character: client.character,
-              machine: client.machine,
-            account: client.account || null
+            sendMessage({ type: 'request_status_client', character: client.character, machine: client.machine, account: client.account || null });
           });
-        });
 
           const closeBtn = document.createElement('button');
-          closeBtn.className = 'btn btn-xs btn-outline btn-error';
-          closeBtn.innerHTML = '<span class="hidden sm:inline">Close</span><i class="fa-solid fa-xmark sm:hidden"></i>';
+          closeBtn.className = 'btn btn-xs btn-error';
+          closeBtn.textContent = 'Close';
           closeBtn.addEventListener('click', () => {
             setButtonPending(closeBtn, `close-${client.machine}-${client.character}-${client.account || ''}`, 800);
             sendMessage({ type: 'close_client', character: client.character, machine: client.machine, account: client.account || null });
@@ -804,8 +829,15 @@
           buttonGroup.appendChild(enterMapBtn);
           buttonGroup.appendChild(reconnectBtn);
           buttonGroup.appendChild(closeBtn);
-          header.appendChild(buttonGroup);
-          container.appendChild(header);
+
+          container.appendChild(primaryInfo);
+          if (metaParts.length) {
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'text-xs text-gray-400 flex flex-wrap gap-x-3';
+            metaDiv.innerHTML = metaParts.map(p => `<span>${p}</span>`).join('');
+            container.appendChild(metaDiv);
+          }
+          container.appendChild(buttonGroup);
           outsideList.appendChild(container);
         });
       }
