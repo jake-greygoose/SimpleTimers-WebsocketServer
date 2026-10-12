@@ -13,6 +13,9 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const WebSocket = require('ws');
+const { planMapSubgroups } = require('./map_subgroups');
+const { validIp, statusLocation, validMapAge, acceptMapAge } = require('./location_state');
+let mapSubgroupAssignments = new Map();
 
 const PORT = process.env.PORT || 8080;
 
@@ -158,6 +161,8 @@ function publicClient(c) {
     account: c.account,
     machine: c.machine,
     server_ip: c.server_ip,
+    loading_server_ip: c.loading_server_ip || null,
+    loading_map_id: c.loading_map_id || null,
     map: c.map,
     game_state: c.game_state,
     map_age_s: c.map_age_s,
@@ -175,6 +180,7 @@ function publicClient(c) {
     group_source: c.group_source || null,
     auto_accept: c.auto_accept || null,
     pending_invites: c.pending_invites || [],
+    squad_actions_available: c.squad_actions_available === true,
     portal_available: c.portal_available === true
   };
 }
@@ -193,6 +199,7 @@ function sanitizeGroup(group) {
   if (!group || typeof group !== 'object' || !GROUP_TYPES.has(group.type)) return null;
   const members = Array.isArray(group.members) ? group.members.slice(0, GROUP_MEMBER_LIMIT) : [];
   return {
+    id: shortString(group.id),
     type: group.type,
     count: Number.isInteger(group.count) ? group.count : members.length,
     complete: group.complete !== false,
@@ -233,9 +240,10 @@ function buildSquads() {
   const groups = [];
   for (const c of reporters) {
     const accounts = new Set(c.group.members.map(m => accountKey(m.account)));
-    const overlapping = groups.filter(g => [...accounts].some(a => g.accounts.has(a)));
-    const merged = { accounts, reporters: [c] };
+    const overlapping = groups.filter(g => c.group.id && g.id ? c.group.id === g.id : [...accounts].some(a => g.accounts.has(a)));
+    const merged = { id: c.group.id, accounts, reporters: [c] };
     for (const g of overlapping) {
+      if (!merged.id) merged.id = g.id;
       g.accounts.forEach(a => merged.accounts.add(a));
       merged.reporters.push(...g.reporters);
       groups.splice(groups.indexOf(g), 1);
@@ -293,7 +301,7 @@ function buildSquads() {
     const commander = list.find(m => m.commander) || null;
     const type = g.reporters.some(r => r.group.type === 'squad' || r.group.type === 'raid_squad') ? 'squad' : 'party';
     return {
-      id: accountKey(commander ? commander.account : list.map(m => m.account).sort()[0]),
+      id: g.id || accountKey(commander ? commander.account : list.map(m => m.account).sort()[0]),
       type,
       commander: commander ? (commander.character || commander.account) : null,
       commander_account: commander ? commander.account : null,
@@ -322,7 +330,7 @@ function touchInstance(ip) {
 // instance's opening time; one that disagrees by minutes means a different
 // instance now runs on that IP.
 function recordMapAge(client, ageSeconds) {
-  if (!client.server_ip || typeof ageSeconds !== 'number' || ageSeconds < 0) return;
+  if (!validIp(client.server_ip) || !validMapAge(ageSeconds)) return;
   const inst = touchInstance(client.server_ip);
   const openedAt = Date.now() - ageSeconds * 1000;
   const minutes = Math.round(ageSeconds / 60);
@@ -545,6 +553,7 @@ function setInstance(ws, client, serverIp) {
   touchInstance(client.server_ip);  // the one being left was last seen now
   removeFromIndex(instances, client.server_ip, ws);
   client.server_ip = serverIp || null;
+  client.map_age_s = client.map_fresh = client.map_age_at = null;
   addToIndex(instances, client.server_ip, ws);
   touchInstance(client.server_ip);
 }
@@ -560,19 +569,33 @@ function applyStatus(ws, client, data) {
   }
   // A client already in EotM when it (re)connects - after a server restart,
   // say - names its instance here; one that is not in EotM is on no instance.
-  const statusIp = realValue(data.server_ip);
-  // Builds without in_eotm only report an IP while in EotM.
-  if ((data.in_eotm === true || data.in_eotm === undefined) && statusIp) {
-    setInstance(ws, client, statusIp);
+  if (data.in_eotm === undefined) {
+    // Builds without in_eotm only report an IP while in EotM.
+    const statusIp = realValue(data.server_ip);
+    if (statusIp && validIp(statusIp)) setInstance(ws, client, statusIp);
+    if (data.map_age_s != null && validIp(client.server_ip) && validMapAge(data.map_age_s)) {
+      client.map_age_s = data.map_age_s;
+      client.map_fresh = data.map_fresh;
+      client.map_age_at = Date.now();
+      recordMapAge(client, data.map_age_s);
+    }
   }
-  else if (data.in_eotm === false) {
-    setInstance(ws, client, null);
-  }
-  if (data.map_age_s != null) {
-    client.map_age_s = data.map_age_s;
-    client.map_fresh = data.map_fresh;
-    client.map_age_at = Date.now();
-    recordMapAge(client, data.map_age_s);
+  else {
+    // Full snapshots must agree on gameplay, map identity and address.
+    // A loading destination never counts as an occupied instance.
+    const location = statusLocation(data);
+    client.loading_server_ip = location.loadingIp;
+    client.loading_map_id = location.loadingMapId;
+    setInstance(ws, client, location.activeIp);
+    if (acceptMapAge(client, data)) {
+      client.map_age_s = data.map_age_s;
+      client.map_fresh = data.map_fresh;
+      client.map_age_at = Date.now();
+      recordMapAge(client, data.map_age_s);
+    }
+    else {
+      client.map_age_s = client.map_fresh = client.map_age_at = null;
+    }
   }
   if (data.auto_accept && typeof data.auto_accept === 'object') {
     client.auto_accept = {
@@ -587,6 +610,7 @@ function applyStatus(ws, client, data) {
       .map(i => ({ type: i.type === 'squad' ? 'squad' : 'party', leader: shortString(i.leader) }));
   }
   if (typeof data.portal_available === 'boolean') client.portal_available = data.portal_available;
+  if (typeof data.squad_actions_available === 'boolean') client.squad_actions_available = data.squad_actions_available;
   if (data.group && typeof data.group.source === 'string') client.group_source = shortString(data.group.source, 16);
   if (data.group !== undefined) {
     const before = client.group;
@@ -839,6 +863,8 @@ const ACKS = {
   auto_accept_set: d => ['info', `auto-accept ${[d.squad && 'squad', d.party && 'party'].filter(Boolean).join(' + ') || 'off'}` +
     (d.leaders ? ` (only from ${d.leaders})` : '') + (d.available === false ? ' - not available on this client' : '')],
   accept_invites_queued: d => ['info', `accepting ${d.pending} pending invite(s)`],
+  squad_action_queued: d => ['info', `${d.command} queued`],
+  squad_action_result: d => [d.confirmed ? 'good' : 'warn', `${d.command}: ${d.reason}${d.subgroup ? ` (subgroup ${d.subgroup})` : ''}`],
   join_in_map_queued: d => ['info', `joining ${d.name}'s instance`],
   group_event: d => [/^Accepted|sent$/.test(d.text || '') ? 'good' : 'warn', d.text || 'group event'],
   sqinvite_sent: d => ['info', `invited ${d.name} to squad`],
@@ -867,10 +893,12 @@ function handleClientMessage(ws, data) {
 
     case 'map_update':
       updateIdentity(ws, client, data);
-      if (!realValue(data.server_ip)) {
+      if (!validIp(data.server_ip) || (data.game_state !== undefined && data.game_state !== 'gameplay')) {
         return;
       }
       client.map = 'eotm';
+      client.game_state = 'gameplay';
+      client.loading_server_ip = client.loading_map_id = null;
       client.map_age_s = null;   // reported separately once read
       client.map_fresh = null;
       client.map_age_at = null;
@@ -883,6 +911,8 @@ function handleClientMessage(ws, data) {
       updateIdentity(ws, client, data);
       setInstance(ws, client, null);
       client.map = null;
+      client.loading_server_ip = client.loading_map_id = null;
+      client.game_state = ['loading', 'character_select', 'login', 'disconnect_error'].includes(data.reason) ? data.reason : 'unknown';
       client.map_age_s = null;
       client.map_fresh = null;
       client.map_age_at = null;
@@ -890,6 +920,7 @@ function handleClientMessage(ws, data) {
       break;
 
     case 'map_age':
+      if (!acceptMapAge(client, data)) return;
       client.map_age_s = data.map_age_s;
       client.map_fresh = data.fresh;
       client.map_age_at = Date.now();
@@ -978,6 +1009,12 @@ const COMMANDS = {
   sqinvite: c => (validName(c.name) ? { type: 'sqinvite', name: c.name.trim() } : null),
   sqjoin: c => (validName(c.name) ? { type: 'sqjoin', name: c.name.trim() } : null),
   sqleave: () => ({ type: 'sqleave' }),
+  organize_eotm_subgroups: () => ({ type: 'organize_eotm_subgroups' }),
+  create_squad: () => ({ type: 'create_squad' }),
+  move_subgroup: c => {
+    const subgroup = intInRange(c.subgroup, 1, 15, null);
+    return subgroup === null ? null : { type: 'move_subgroup', subgroup };
+  },
   accept_invites: () => ({ type: 'accept_invites' }),
   join_in_map: c => (validName(c.name) ? { type: 'join_in_map', name: c.name.trim() } : null),
   set_auto_accept: c => {
@@ -1121,6 +1158,20 @@ function runCommand(data) {
     const queued = sendPaced(wire, resolved.sockets);
     logEvent('info', `Sending ${command.type} to ${resolved.what}: ${queued} queued, ` +
       `one per machine every ${PACED[wire]} ms`);
+    return;
+  }
+  if (payload.type === 'organize_eotm_subgroups') {
+    const selected = new Set(resolved.sockets.map(ws => clients.get(ws)?.id).filter(id => id != null));
+    const byId = new Map([...clients.values()].map(c => [c.id, c]));
+    const plan = planMapSubgroups(buildSquads(), byId, mapSubgroupAssignments, selected);
+    mapSubgroupAssignments = plan.next;
+    let sent = 0;
+    for (const move of plan.moves) {
+      const ws = clientsById.get(move.client);
+      if (ws && send(ws, { type: 'move_subgroup', subgroup: move.subgroup, expected_server_ip: move.expected_server_ip, expected_squad_id: move.expected_squad_id })) sent++;
+    }
+    for (const warning of plan.warnings) logEvent('warn', `Map subgroup assignment skipped: ${warning.reason}`);
+    logEvent('info', `EotM subgroup plan: ${plan.assignments.length} instance(s), ${sent} move request(s)`);
     return;
   }
   let sent = 0;

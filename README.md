@@ -31,6 +31,13 @@ connects or reconnects (only what differs is sent). Empty fields are left to
 each client. Saved to the defaults file below; attach a Render disk at `/data`
 to keep them across deploys.
 
+## Squad subgroups
+
+The squad tools can create a squad, move clients to a subgroup, and "Group by
+EotM map": one subgroup per EotM instance for the targeted clients already in
+the same squad (planned in `map_subgroups.js`; clients check the instance and
+squad id before moving).
+
 ## Environment
 
 | Variable | Meaning |

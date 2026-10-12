@@ -148,6 +148,10 @@
           <button class="btn btn-flat btn-xs" data-cmd="invite" title="Target clients invite this player to their party">Party invite</button>
           <button class="btn btn-flat btn-xs" data-cmd="sqinvite" title="Target clients invite this player to their squad">Squad invite</button>
           <button class="btn btn-flat btn-xs" data-cmd="sqjoin" title="Target clients join this player's squad">Join squad</button>
+          <button class="btn btn-flat btn-xs" data-cmd="create_squad" title="Target clients create a squad if they are not already in one">Create squad</button>
+          <input id="subgroup-number" type="number" min="1" max="15" value="1" aria-label="Destination subgroup" style="width: 4rem">
+          <button class="btn btn-flat btn-xs" data-cmd="move_subgroup" title="Move each target character to this subgroup">Move subgroup</button>
+          <button class="btn btn-flat btn-xs" data-cmd="organize_eotm_subgroups" title="Assign one subgroup per EotM instance for target clients already in a squad">Group by EotM map</button>
           <button class="btn btn-flat btn-xs" data-cmd="sqleave" title="Target clients leave their squad">Leave squad</button>
           <span class="tools-sep"></span>
           <span class="cluster-label">Auto-accept</span>

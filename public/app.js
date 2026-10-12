@@ -382,7 +382,8 @@ function updateClientRow(tr, c) {
   setText(cells.whereBadge, whereText);
   setClass(cells.whereBadge, whereClass);
 
-  setText(cells.ip, c.server_ip || '—');
+  setText(cells.ip, c.server_ip || (c.loading_server_ip ? `${c.loading_server_ip} (loading)` : '—'));
+  setTitle(cells.ip, c.loading_server_ip ? `Destination map ${c.loading_map_id}; not yet in gameplay` : '');
 
   const age = clientAgeSeconds(c);
   if (age != null) {
@@ -964,6 +965,11 @@ function buildCommand(button) {
       return null;
     }
     command.mb = mb;
+  }
+  if (type === 'move_subgroup') {
+    const subgroup = Number($('subgroup-number').value);
+    if (!Number.isInteger(subgroup) || subgroup < 1 || subgroup > 15) return null;
+    command.subgroup = subgroup;
   }
   if (type === 'set_fps') {
     const fps = parseInt($('fps').value, 10);
