@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EotM Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="currentColor"/>
+        <path d="M9 22 16 9l7 13" fill="none" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 17.5h8" fill="none" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round"/>
+      </svg>
+      <div class="brand-text">
+        <span class="brand-name">EotM Control</span>
+        <span class="brand-sub">Instance manager</span>
+      </div>
+    </div>
+    <div class="topbar-status">
+      <span id="updated" class="muted"></span>
+      <span id="conn" class="status-pill"><span class="dot"></span><span id="conn-text">Connecting…</span></span>
+    </div>
+  </header>
+
+  <main>
+    <section class="stats" aria-label="Summary">
+      <div class="stat"><span class="stat-label">Clients</span><span class="stat-value" id="t-clients">0</span></div>
+      <div class="stat"><span class="stat-label">In EotM</span><span class="stat-value" id="t-eotm">0</span></div>
+      <div class="stat"><span class="stat-label">Instances occupied</span><span class="stat-value" id="t-instances">0</span></div>
+      <div class="stat"><span class="stat-label">Machines</span><span class="stat-value" id="t-machines">0</span></div>
+      <div class="stat">
+        <span class="stat-label">Fresh · old instances</span>
+        <span class="stat-value"><span id="t-fresh" class="tone-good">0</span><span class="stat-sep">·</span><span id="t-old" class="tone-warn">0</span></span>
+      </div>
+      <div class="stat"><span class="stat-label">Rendering skipped</span><span class="stat-value" id="t-skip">0</span></div>
+    </section>
+
+    <section class="commandbar" aria-label="Actions">
+      <div class="target">
+        <label for="target">Send to</label>
+        <div class="select-wrap">
+          <select id="target"></select>
+        </div>
+        <span id="target-count" class="target-count"></span>
+      </div>
+
+      <div class="commands">
+        <div class="cluster">
+          <button class="btn btn-primary" data-cmd="enter_map">
+            <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/></svg>
+            Enter EotM
+          </button>
+          <button class="btn" data-cmd="reconnect">
+            <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+            Reconnect
+          </button>
+        </div>
+
+        <div class="cluster">
+          <span class="cluster-label">Render</span>
+          <div class="seg" role="group" aria-label="Rendering">
+            <button data-cmd="set_render_skip" data-mode="off">Normal</button>
+            <button data-cmd="set_render_skip" data-mode="always">Skip</button>
+            <button data-cmd="set_render_skip" data-mode="unfocused">Unfocused</button>
+          </div>
+        </div>
+
+        <div class="cluster">
+          <span class="cluster-label">FPS</span>
+          <div class="inline-field">
+            <input id="fps" type="number" min="1" max="200" value="15" aria-label="FPS cap">
+            <button class="btn btn-flat" data-cmd="set_fps">Set</button>
+          </div>
+          <button class="btn btn-flat" data-cmd="disable_fps_limiter" title="Turn the FPS limiter off">Uncap</button>
+        </div>
+
+        <div class="cluster">
+          <span class="cluster-label">Pacer</span>
+          <div class="seg" role="group" aria-label="Frame pacer patch">
+            <button data-cmd="set_pacer_patch" data-enabled="true">On</button>
+            <button data-cmd="set_pacer_patch" data-enabled="false">Off</button>
+          </div>
+        </div>
+
+        <div class="cluster">
+          <button class="btn btn-icon" data-cmd="bring_to_front" title="Focus window" aria-label="Focus window">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          </button>
+          <button class="btn btn-icon" data-cmd="minimize" title="Minimize window" aria-label="Minimize window">
+            <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+          </button>
+        </div>
+
+        <details class="menu" id="close-menu">
+          <summary class="btn btn-danger-soft">
+            <svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg>
+            Close
+            <svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+          </summary>
+          <div class="menu-panel" role="menu">
+            <button class="menu-item danger" data-cmd="close" role="menuitem">Close game on target</button>
+            <button class="menu-item" id="keep-instance" role="menuitem">Keep 2 per instance</button>
+            <button class="menu-item" id="keep-machine" role="menuitem">Keep 5 per machine</button>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="panel instances" aria-label="Instances">
+      <div class="panel-head">
+        <h2>Instances</h2>
+        <span id="inst-sub" class="panel-sub"></span>
+      </div>
+      <div id="inst-grid" class="inst-grid"></div>
+      <div id="inst-empty" class="empty empty-small">
+        <p>No EotM instances seen yet. They appear here as soon as a client lands on one.</p>
+      </div>
+    </section>
+
+    <section class="panel squads" aria-label="Squads">
+      <div class="panel-head">
+        <h2>Squads</h2>
+        <span id="squad-sub" class="panel-sub"></span>
+        <div class="group-tools">
+          <input id="group-name" type="text" maxlength="64" placeholder="Character or account name" aria-label="Character or account name">
+          <button class="btn btn-flat btn-xs" data-cmd="invite" title="Target clients invite this player to their party">Party invite</button>
+          <button class="btn btn-flat btn-xs" data-cmd="sqinvite" title="Target clients invite this player to their squad">Squad invite</button>
+          <button class="btn btn-flat btn-xs" data-cmd="sqjoin" title="Target clients join this player's squad">Join squad</button>
+          <button class="btn btn-flat btn-xs" data-cmd="sqleave" title="Target clients leave their squad">Leave squad</button>
+          <span class="tools-sep"></span>
+          <span class="cluster-label">Auto-accept</span>
+          <div class="seg" role="group" aria-label="Auto-accept invites">
+            <button data-cmd="set_auto_accept" data-auto="off">Off</button>
+            <button data-cmd="set_auto_accept" data-auto="squad">Squad</button>
+            <button data-cmd="set_auto_accept" data-auto="both">Squad + party</button>
+          </div>
+          <button class="btn btn-flat btn-xs" data-cmd="accept_invites" title="Target clients accept the invites waiting for them now">Accept invites</button>
+        </div>
+      </div>
+      <div id="squad-list" class="squad-list"></div>
+      <div id="squad-empty" class="empty empty-small">
+        <p>None of the connected clients is in a party or squad.</p>
+      </div>
+    </section>
+
+    <div class="layout">
+      <section class="panel clients" aria-label="Clients">
+        <div class="panel-head">
+          <div class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="search" type="search" placeholder="Search character, machine or IP" aria-label="Search">
+          </div>
+          <div class="seg seg-quiet" role="group" aria-label="Group by">
+            <button data-group="instance">Instance</button>
+            <button data-group="machine">Machine</button>
+            <button data-group="none">List</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="w-check"><input type="checkbox" id="select-all" aria-label="Select all shown"></th>
+                <th class="w-char">Character</th>
+                <th class="w-machine hide-sm">Machine</th>
+                <th class="w-where">Where</th>
+                <th class="w-ip hide-sm">Instance</th>
+                <th class="w-age">Map age</th>
+                <th class="w-render hide-md">Rendering</th>
+                <th class="w-seen hide-md">Seen</th>
+                <th class="w-row"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+          <div id="empty" class="empty">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            <p id="empty-text">No game clients connected.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel feed" aria-label="Activity">
+        <div class="panel-head"><h2>Activity</h2></div>
+        <ol id="events" class="events"></ol>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="confirm">
+    <form method="dialog">
+      <h3>Are you sure?</h3>
+      <p id="confirm-text"></p>
+      <div class="dialog-btns">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn btn-danger" value="ok" id="confirm-ok">Close games</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="auth">
+    <form method="dialog" id="auth-form">
+      <h3>Server token</h3>
+      <p>This server is protected. Enter the token set as <code>EOTM_TOKEN</code>.</p>
+      <input id="token" type="password" autocomplete="current-password" placeholder="Token" aria-label="Server token">
+      <div class="dialog-btns">
+        <button class="btn btn-primary" value="ok">Connect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
