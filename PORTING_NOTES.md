@@ -82,14 +82,14 @@ the instance card, taking a keep count, built like `close_excess` but sending
 `go_to_character_select`. The `COMMANDS` entry already exists; it needs a
 dashboard button and a `keep` variant.
 
-### 4. Throttled closing (350 ms per machine)
+### 4. Throttled closing (350 ms per machine) - DONE
 The old server spaced `close_game` commands 350 ms apart per machine
 (`EOTM_CLOSE_COMMAND_INTERVAL_MS`), so closing dozens of clients on one PC
 does not stall it. The new server sends closes all at once.
 Port: a per-machine queue in `runCommand` / `closeExcess` for close commands.
 About 30 lines; worth doing before closing many clients at once.
 
-### 5. Staggered focus (1 s per machine)
+### 5. Staggered focus (1 s per machine) - DONE
 `bring_to_front` to many clients on one machine was queued 1 s apart, so the
 windows don't fight over the foreground. Same queue as above with a 1 s
 interval for `bring_to_front`.
@@ -110,7 +110,7 @@ dashboard control. Add an "MB" field next to FPS in the command bar.
 
 ## Suggested order
 
-1. Throttled close + staggered focus (4, 5): safety, small.
+1. ~~Throttled close + staggered focus (4, 5)~~ - done: `sendPaced` in server.js.
 2. Character select per client and per instance (7, 3); memory limit (8).
 3. Enter-map status chips (6).
 4. Launch Sequence on the server with fresh-instance awareness (1, 2).

@@ -514,7 +514,7 @@ const CONTENT_TYPES = {
 
 function healthBody() {
   return { status: 'ok', clients: clients.size, instances: instances.size, known_instances: knownInstances.size,
-    machines: machines.size, dashboards: dashboards.size };
+    machines: machines.size, dashboards: dashboards.size, paced_pending: pacedPending() };
 }
 
 // Serves the dashboard and the health check.
@@ -693,6 +693,8 @@ const instanceSweep = setInterval(() => {
 function close() {
   clearInterval(heartbeat);
   clearInterval(instanceSweep);
+  for (const queue of pacedQueues.values()) clearTimeout(queue.timer);
+  pacedQueues.clear();
   clientWss.close();
   dashboardWss.close();
 }
@@ -896,6 +898,80 @@ function toWire(payload) {
   return Object.keys(payload).length === 1 && PLAIN_COMMANDS.has(payload.type) ? payload.type : payload;
 }
 
+// ------------------------------------------------------------------ paced sends
+
+// Some commands hurt when a whole machine gets them at once: closing dozens of
+// games together stalls the PC, and bring_to_front on every window at once
+// just has them fight over the foreground. Those go through a queue per
+// machine, one message per interval; machines run in parallel.
+const PACED = {
+  close_game: Number(process.env.EOTM_CLOSE_COMMAND_INTERVAL_MS) || 350,
+  bring_to_front: Number(process.env.EOTM_FOCUS_INTERVAL_MS) || 1000
+};
+
+const pacedQueues = new Map();  // "command|machine" -> { items: [ws], timer }
+
+function pacedKey(type, ws) {
+  const client = clients.get(ws);
+  // A client that has not named its machine gets a queue of its own.
+  return `${type}|${client && client.machine ? `m:${client.machine}` : `c:${client ? client.id : '?'}`}`;
+}
+
+// Queues `type` (a plain-string command) for each socket. Returns how many
+// were queued; a socket already waiting for the same command is not queued
+// twice.
+function sendPaced(type, sockets) {
+  let queued = 0;
+  for (const ws of sockets) {
+    if (!clients.has(ws)) continue;
+    const key = pacedKey(type, ws);
+    let queue = pacedQueues.get(key);
+    if (!queue) {
+      queue = { type, items: [], timer: null };
+      pacedQueues.set(key, queue);
+    }
+    if (queue.items.includes(ws)) continue;
+    queue.items.push(ws);
+    queued++;
+    if (!queue.timer) {
+      drainPaced(key);  // the first one goes immediately
+    }
+  }
+  return queued;
+}
+
+function drainPaced(key) {
+  const queue = pacedQueues.get(key);
+  if (!queue) return;
+  // Skip sockets that went away while waiting.
+  let ws;
+  while ((ws = queue.items.shift()) && !send(ws, queue.type)) { /* gone */ }
+  if (queue.items.length === 0) {
+    queue.timer = ws ? setTimeout(() => finishPaced(key), PACED[queue.type]) : null;
+    if (!ws) pacedQueues.delete(key);
+    return;
+  }
+  queue.timer = setTimeout(() => drainPaced(key), PACED[queue.type]);
+}
+
+// The interval after the last send still applies to anything queued during it.
+function finishPaced(key) {
+  const queue = pacedQueues.get(key);
+  if (!queue) return;
+  if (queue.items.length) {
+    drainPaced(key);
+  }
+  else {
+    pacedQueues.delete(key);
+  }
+}
+
+function pacedPending() {
+  let n = 0;
+  for (const q of pacedQueues.values()) n += q.items.length;
+  return n;
+}
+
 function runCommand(data) {
   const command = data.command || {};
   const build = COMMANDS[command.type];
@@ -909,8 +985,14 @@ function runCommand(data) {
     logEvent('warn', `Dashboard sent ${command.type} with invalid arguments`);
     return;
   }
-  let sent = 0;
   const wire = toWire(payload);
+  if (typeof wire === 'string' && PACED[wire]) {
+    const queued = sendPaced(wire, resolved.sockets);
+    logEvent('info', `Sending ${command.type} to ${resolved.what}: ${queued} queued, ` +
+      `one per machine every ${PACED[wire]} ms`);
+    return;
+  }
+  let sent = 0;
   for (const ws of resolved.sockets) if (send(ws, wire)) sent++;
   logEvent('info', `Sent ${command.type} to ${resolved.what} (${sent} delivered)`);
 }
@@ -945,13 +1027,13 @@ function handleDashboardMessage(ws, data) {
 
 // Closes all but the first `keep` clients of every group (instance or machine).
 function closeExcess(index, keep, groupName) {
-  let total = 0;
+  const victims = [];
   for (const set of index.values()) {
-    for (const ws of [...set].slice(keep)) {
-      if (send(ws, 'close_game')) total++;
-    }
+    victims.push(...[...set].slice(keep));
   }
-  logEvent('warn', `Closed ${total} client(s), keeping ${keep} per ${groupName}`);
+  const queued = sendPaced('close_game', victims);
+  logEvent('warn', `Closing ${queued} client(s), keeping ${keep} per ${groupName} ` +
+    `(one per machine every ${PACED.close_game} ms)`);
 }
 
 // ------------------------------------------------------------------ start
