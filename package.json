@@ -1,21 +1,15 @@
 {
-  "name": "timer-wss-server",
-  "version": "1.0.0",
-  "description": "WebSocket Secure server for collaborative timers on Render.com",
+  "name": "eotm-control",
+  "version": "2.0.0",
+  "description": "Server and web dashboard for the eotm-assist Guild Wars 2 addon",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node server.js"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   },
-"dependencies": {
-  "sqlite3": "^5.1.6",
-  "ws": "^8.14.2",
-  "bcrypt": "^5.1.1"
-},
-  "devDependencies": {
-    "nodemon": "^3.0.1"
+  "dependencies": {
+    "ws": "^8.16.0"
   }
 }

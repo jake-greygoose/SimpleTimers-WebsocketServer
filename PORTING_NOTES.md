@@ -1,11 +1,11 @@
 # Features from the previous EotM dashboard
 
-The EotM side of this repo was replaced by the eotm-assist server and dashboard
-(`eotm/`), mounted on the same paths: `/eotm/` dashboard, `/eotm/ws` game
-clients, `/eotm/admin` dashboard socket, `/eotm/health`. The timer service is
-unchanged. This note lists what the previous dashboard (`eotm-dashboard.html`
-and the EotM half of `server.js`, last commit 2e6823f) did, whether the addon
-supports it, and how to bring it into the new one.
+This repo used to host a collaborative-timers server with an EotM dashboard
+added to it. Both were replaced by the eotm-assist server and dashboard
+(`server.js`, `public/`). This note lists what the previous dashboard
+(`eotm-dashboard.html` and the EotM half of the old `server.js`, last in commit
+2e6823f) did, whether the addon supports it, and how to bring it into the new
+one.
 
 **Every command the old dashboard sent is supported by the current addon.**
 That covers `enter_map`, `reconnect`, `go_to_character_select`, `close_game`,

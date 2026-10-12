@@ -1,1091 +1,979 @@
-const http = require('http');
-const WebSocket = require('ws');
-const sqlite3 = require('sqlite3').verbose();
+// EotM Control: the server the eotm-assist addon connects to, and its web
+// dashboard.
+//
+//   /  or /eotm/          dashboard (public/)
+//   /health, /eotm/health JSON health check
+//   WebSocket /dashboard, /admin, /eotm/admin   dashboard
+//   WebSocket on any other path                 game client (the addon)
+//
+// Game clients are accepted on any path so that every addon URL in use keeps
+// working: wss://host/, wss://host/eotm/ws, ...
 const crypto = require('crypto');
-const url = require('url');
-const path = require('path');
 const fs = require('fs');
-const bcrypt = require('bcrypt');
+const http = require('http');
+const path = require('path');
+const WebSocket = require('ws');
 
-
-/**
- * Generate a short, readable invite code
- * @param {number} [length=6] - Length of the invite code
- * @returns {string} Generated invite code
- */
-function generateInviteCode(length = 6) {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // easy-to-read characters
-  let code = '';
-  for (let i = 0; i < length; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
-
-/**
- * Generate a unique invite code for a room
- * @returns {Promise<string>} Unique invite code
- */
-async function generateUniqueInviteCode() {
-  while (true) {
-    const code = generateInviteCode();
-    try {
-      const existingRoom = await getOne('SELECT * FROM rooms WHERE invite_token = ?', [code]);
-      if (!existingRoom) {
-        return code;
-      }
-      // If code exists, loop will generate a new one
-    } catch (error) {
-      console.error('Error checking invite code uniqueness:', error);
-      throw error;
-    }
-  }
-}
-
-
-// EotM Control (eotm-assist addon server + dashboard) lives in ./eotm and
-// owns every /eotm path: the dashboard, /eotm/health, and the /eotm/ws and
-// /eotm/admin WebSockets.
-const eotm = require('./eotm')({ basePath: '/eotm' });
-
-// Create a simple HTTP server with improved routing
-const server = http.createServer((req, res) => {
-  if (eotm.handleRequest(req, res)) return;
-
-  const parsedUrl = url.parse(req.url, true);
-  const pathname = parsedUrl.pathname;
-  
-  // Route for the client page
-  if (pathname === '/client') {
-    const clientPath = path.join(__dirname, 'client.html');
-    
-    // Read the client HTML file and serve it
-    fs.readFile(clientPath, (err, content) => {
-      if (err) {
-        // If the file doesn't exist, create a simple error response
-        if (err.code === 'ENOENT') {
-          res.writeHead(404, { 'Content-Type': 'text/html' });
-          res.end('<h1>Error 404: Client file not found</h1><p>Please make sure client.html exists in the application directory.</p>');
-        } else {
-          // Server error
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end('Internal Server Error: ' + err.message);
-        }
-      } else {
-        // Successfully read the file, serve it
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(content);
-      }
-    });
-  } else {
-    // Default response for the root and other routes
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Timer WebSocket server is running');
-  }
-});
-
-// Get port from environment variable (required for Render.com)
 const PORT = process.env.PORT || 8080;
 
-// Ensure tmp directory exists for Render.com
-const dbDir = '/data';
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+// Shared secret. When set, game clients must send it as
+// "Authorization: Bearer <token>" (the addon's "Server token" setting) and the
+// dashboard must send {"type":"auth","token":...} as its first message.
+// Unset means no check at all - only acceptable on a private network.
+const TOKEN = process.env.EOTM_TOKEN || '';
+
+// The dashboard used to live under /eotm on a shared server; both forms work.
+const LEGACY_PREFIX = '/eotm';
+const DASHBOARD_SOCKET_PATHS = new Set(['/dashboard', '/admin', '/eotm/admin']);
+
+// A dashboard that has not authenticated within this long is disconnected.
+const DASHBOARD_AUTH_TIMEOUT_MS = 10000;
+
+// Protocol-level ping. ixwebsocket answers these automatically, so a client
+// that misses one full interval is dead (crashed game, dropped network) and is
+// dropped instead of lingering in its instance list forever.
+const HEARTBEAT_MS = 30000;
+
+// Dashboards get a fresh snapshot at most this often, however busy the clients.
+const SNAPSHOT_THROTTLE_MS = 250;
+
+// Recent events kept for dashboards that connect later.
+const EVENT_LIMIT = 200;
+
+// An EotM map instance younger than this is "fresh" on the dashboard.
+// Matches the addon's default "Fresh map if younger than" setting.
+const FRESH_MINUTES = Number(process.env.EOTM_FRESH_MINUTES) || 10;
+
+// Instances none of our clients are on any more are remembered this long, so
+// the dashboard still lists where they were and how old they are.
+const INSTANCE_FORGET_MS = (Number(process.env.EOTM_INSTANCE_FORGET_MINUTES) || 180) * 60 * 1000;
+
+// Map age is exact to the server tick, so two readings of one instance agree
+// on its opening time to within a few seconds. A bigger gap means the IP now
+// hosts a different instance.
+const SAME_INSTANCE_TOLERANCE_MS = 2 * 60 * 1000;
+
+// Constant-time comparison, so response timing does not leak the token a
+// character at a time. Hashing first makes the lengths equal.
+function tokenMatches(candidate) {
+  if (!TOKEN) return true;
+  if (typeof candidate !== 'string') return false;
+  const a = crypto.createHash('sha256').update(candidate).digest();
+  const b = crypto.createHash('sha256').update(TOKEN).digest();
+  return crypto.timingSafeEqual(a, b);
 }
 
-// Configure database path that works on Render.com
-const dbPath = path.join(dbDir, 'timer_app.db');
-console.log(`Using persistent database at: ${dbPath}`);
-
-// Initialize SQLite database
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Database opening error:', err);
-  } else {
-    console.log('Connected to SQLite database');
-    initializeDatabase();
-  }
-});
-
-// Initialize the database schema
-
-function initializeDatabase() {
-  db.serialize(() => {
-    // Enable WAL Mode
-    db.exec("PRAGMA journal_mode = WAL;");
-
-    // Create rooms table
-    db.run(`CREATE TABLE IF NOT EXISTS rooms (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      password_hash TEXT,
-      is_public INTEGER DEFAULT 1,
-      invite_token TEXT UNIQUE
-    )`);
-
-    // Create timers table
-    db.run(`CREATE TABLE IF NOT EXISTS timers (
-      id TEXT PRIMARY KEY,
-      room_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      duration INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      started_at INTEGER DEFAULT NULL,
-      paused_at INTEGER DEFAULT NULL,
-      completed_at INTEGER DEFAULT NULL,
-      status TEXT NOT NULL,
-      FOREIGN KEY (room_id) REFERENCES rooms(id)
-    )`);
-
-    // Create clients table
-    db.run(`CREATE TABLE IF NOT EXISTS clients (
-      id TEXT PRIMARY KEY,
-      room_id TEXT,
-      last_seen INTEGER NOT NULL,
-      FOREIGN KEY (room_id) REFERENCES rooms(id)
-    )`);
-
-    // Create a default public room if none exists
-    const now = Math.floor(Date.now() / 1000);
-    
-    // Modify to use the new invite code generation
-    (async () => {
-      try {
-        const defaultInviteToken = await generateUniqueInviteCode();
-        
-        db.run(`INSERT OR IGNORE INTO rooms (id, name, created_at, is_public, invite_token)
-          VALUES ('default', 'Public Room', ?, 1, ?)`, 
-          [now, defaultInviteToken], 
-          function(err) {
-            if (err) {
-              console.error('Error creating default room:', err);
-            } else if (this.changes > 0) {
-              console.log('Default room created');
-            }
-          }
-        );
-      } catch (error) {
-        console.error('Error generating invite token for default room:', error);
-      }
-    })();
-  });
+function bearerToken(req) {
+  const header = req.headers['authorization'] || '';
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 }
 
-// Create a promise-based wrapper for database operations
-function runQuery(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) {
-      if (err) reject(err);
-      else resolve({ lastID: this.lastID, changes: this.changes });
-    });
-  });
+// Game clients and dashboards on separate paths; the upgrade handler below
+// routes between them. Dashboards are never counted as clients and never
+// receive game commands.
+const clientWss = new WebSocket.Server({ noServer: true });
+const dashboardWss = new WebSocket.Server({ noServer: true });
+
+// ------------------------------------------------------------------ state
+
+// Every connected game client: Map<WebSocket, ClientState>.
+const clients = new Map();
+const clientsById = new Map();   // id -> WebSocket
+let nextClientId = 0;
+
+// Indexes over `clients`. Sets, so a client can never be listed twice.
+const instances = new Map(); // server_ip -> Set<WebSocket>
+const machines = new Map();  // machine   -> Set<WebSocket>
+
+// Every EotM instance we have seen, keyed by server IP (one IP = one map
+// instance): { ip, opened_at, first_seen, last_seen }. opened_at is server
+// time worked out from a client's map age reading; null until one arrives.
+const knownInstances = new Map();
+
+// EotM reset times (server ms): the next one clients report, and the most
+// recent one that has passed. Instances last seen before a passed reset are gone.
+let nextEotmResetAt = null;
+let lastEotmResetAt = null;
+
+const dashboards = new Set();
+
+const events = [];
+let nextEventId = 0;
+
+function now() {
+  return new Date().toISOString();
 }
 
-function getOne(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
+function addToIndex(index, key, ws) {
+  if (!key) return;
+  if (!index.has(key)) index.set(key, new Set());
+  index.get(key).add(ws);
 }
 
-function getAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows || []);
-    });
-  });
+function removeFromIndex(index, key, ws) {
+  if (!key) return;
+  const set = index.get(key);
+  if (!set) return;
+  set.delete(ws);
+  if (set.size === 0) index.delete(key);
 }
 
-/**
- * Helper function to calculate the current state of a timer.
- * Computes the remaining time based on the timer's status and timestamps.
- */
-function calculateCurrentTimerState(timer) {
-  const now = Math.floor(Date.now() / 1000);
-  let remaining = timer.duration;
+function send(ws, payload) {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(typeof payload === 'string' ? payload : JSON.stringify(payload));
+  return true;
+}
 
-  switch (timer.status) {
-    case 'running':
-      remaining = Math.max(0, timer.duration - (now - timer.started_at));
-      if (remaining === 0) {
-        timer.status = 'completed';
-        timer.completed_at = timer.started_at + timer.duration;
-      }
-      break;
-    case 'paused':
-      remaining = Math.max(0, timer.duration - (timer.paused_at - timer.started_at));
-      break;
-    case 'completed':
-      remaining = 0;
-      break;
-    default:
-      remaining = timer.duration;
-  }
+function label(client) {
+  return `${client.character || 'unknown'} (${client.machine || 'unknown machine'})`;
+}
 
+function authedDashboards() {
+  return [...dashboards].filter(d => d.authed);
+}
+
+// ------------------------------------------------------------------ dashboard feed
+
+// Logs to the console and to every dashboard's event feed.
+// level: info | good | warn | bad
+function logEvent(level, text, client) {
+  const event = { id: ++nextEventId, t: Date.now(), level, text, client: client ? client.id : null };
+  events.push(event);
+  if (events.length > EVENT_LIMIT) events.shift();
+  console.log(`[${now()}] ${text}`);
+  for (const d of authedDashboards()) send(d, { type: 'event', event });
+}
+
+// What a dashboard may see of a client.
+function publicClient(c) {
   return {
-    ...timer,
-    remaining,
-    current_server_time: now
+    id: c.id,
+    character: c.character,
+    account: c.account,
+    machine: c.machine,
+    server_ip: c.server_ip,
+    map: c.map,
+    game_state: c.game_state,
+    map_age_s: c.map_age_s,
+    map_fresh: c.map_fresh,
+    map_age_at: c.map_age_at,
+    eotm_reset_at: c.eotm_reset_at,
+    eotm_reset_estimated: c.eotm_reset_estimated,
+    render_skip_mode: c.render_skip_mode,
+    render_skipping: c.render_skipping,
+    pacer_patch: c.pacer_patch,
+    travel_available: c.travel_available,
+    fps_target: c.fps_target,
+    connected_at: c.connected_at,
+    last_update: c.last_update,
+    group_type: c.group ? c.group.type : 'none',
+    group_source: c.group_source || null,
+    auto_accept: c.auto_accept || null,
+    pending_invites: c.pending_invites || [],
+    portal_available: c.portal_available === true
   };
 }
 
-// Create WebSocket servers using the HTTP server (required for WSS on Render.com)
-const timerWss = new WebSocket.Server({ noServer: true });
+// ------------------------------------------------------------------ squads
 
-server.on('upgrade', (req, socket, head) => {
-  if (eotm.handleUpgrade(req, socket, head)) return;
+const GROUP_TYPES = new Set(['none', 'party', 'raid_squad', 'squad']);
+const GROUP_MEMBER_LIMIT = 60;
 
-  timerWss.handleUpgrade(req, socket, head, (ws) => {
-    timerWss.emit('connection', ws, req);
-  });
-});
+function shortString(value, max = 140) {
+  return typeof value === 'string' ? value.slice(0, max) : '';
+}
 
-// Clients collection
-const clients = new Map();
+// The addon's group report, reduced to what we expect - it is client input.
+function sanitizeGroup(group) {
+  if (!group || typeof group !== 'object' || !GROUP_TYPES.has(group.type)) return null;
+  const members = Array.isArray(group.members) ? group.members.slice(0, GROUP_MEMBER_LIMIT) : [];
+  return {
+    type: group.type,
+    count: Number.isInteger(group.count) ? group.count : members.length,
+    complete: group.complete !== false,
+    members: members
+      .filter(m => m && typeof m.account === 'string' && m.account)
+      .map(m => ({
+        account: shortString(m.account).replace(/^:/, ''),  // GW2 prefixes account names with ':'
+        character: shortString(m.character),
+        subgroup: Number.isInteger(m.subgroup) ? m.subgroup : 0,
+        profession: Number.isInteger(m.profession) ? m.profession : 0,
+        self: m.self === true,
+        in_instance: m.in_instance === true,
+        commander: m.commander === true,
+        lieutenant: m.lieutenant === true
+      }))
+  };
+}
 
-// Helper function for batch client updates
-async function updateClientBatch(clientUpdates, now) {
-  for (const update of clientUpdates) {
-    try {
-      if (update.needsCleanup) {
-        // For clients that were terminated, remove them from database
-        await runQuery(`DELETE FROM clients WHERE id = ?`, [update.id]);
-        console.log(`Cleaned up terminated client ${update.id}`);
-      } else if (update.lastSeen) {
-        // For active clients, update their last_seen time
-        await runQuery(`
-          UPDATE clients 
-          SET last_seen = ? 
-          WHERE id = ?
-        `, [update.lastSeen, update.id]);
-      }
-    } catch (error) {
-      console.error(`Error updating client ${update.id}:`, error);
+// RTAPI account names may carry the client's leading ':'.
+function accountKey(name) {
+  return (name || '').replace(/^:/, '').toLowerCase();
+}
+
+// Every squad/party at least one of our clients is in, merged across the
+// clients that report it, with each member placed on an instance where we
+// can tell:
+//   own  - the member is one of our clients, which reports its own IP
+//   seen - one of our clients on that IP sees the member on its instance
+//   elsewhere - our clients in the group are in EotM and none sees them
+function buildSquads() {
+  const reporters = [...clients.values()].filter(c => c.group && c.group.type !== 'none' && c.group.members.length);
+  const ourByAccount = new Map();
+  for (const c of clients.values()) {
+    if (c.account) ourByAccount.set(accountKey(c.account), c);
+  }
+
+  // Clients whose rosters share an account are in the same group.
+  const groups = [];
+  for (const c of reporters) {
+    const accounts = new Set(c.group.members.map(m => accountKey(m.account)));
+    const overlapping = groups.filter(g => [...accounts].some(a => g.accounts.has(a)));
+    const merged = { accounts, reporters: [c] };
+    for (const g of overlapping) {
+      g.accounts.forEach(a => merged.accounts.add(a));
+      merged.reporters.push(...g.reporters);
+      groups.splice(groups.indexOf(g), 1);
     }
+    groups.push(merged);
+  }
+
+  return groups.map(g => {
+    const members = new Map();
+    for (const r of g.reporters) {
+      for (const m of r.group.members) {
+        const key = accountKey(m.account);
+        const entry = members.get(key) || { ...m, seenOn: new Set(), notSeenOn: new Set() };
+        // The member's own report wins for its own fields.
+        if (m.self || !members.has(key)) Object.assign(entry, m);
+        if (r.server_ip) (m.in_instance || m.self ? entry.seenOn : entry.notSeenOn).add(r.server_ip);
+        members.set(key, entry);
+      }
+    }
+
+    const list = [...members.entries()].map(([key, m]) => {
+      const ours = ourByAccount.get(key);
+      let instance = null;
+      let source = 'unknown';
+      if (ours && ours.server_ip) {
+        instance = ours.server_ip;
+        source = 'own';
+      }
+      else if (ours && !ours.server_ip) {
+        source = 'not_in_eotm';
+      }
+      else if (m.seenOn.size) {
+        instance = [...m.seenOn][0];
+        source = 'seen';
+      }
+      else if (m.notSeenOn.size) {
+        source = 'elsewhere';
+      }
+      return {
+        account: m.account,
+        character: m.character,
+        subgroup: m.subgroup,
+        profession: m.profession,
+        commander: m.commander,
+        lieutenant: m.lieutenant,
+        client: ours ? ours.id : null,
+        instance,
+        instance_source: source
+      };
+    });
+    list.sort((a, b) => (a.subgroup - b.subgroup)
+      || (b.commander - a.commander)
+      || (a.character || a.account).localeCompare(b.character || b.account));
+
+    const commander = list.find(m => m.commander) || null;
+    const type = g.reporters.some(r => r.group.type === 'squad' || r.group.type === 'raid_squad') ? 'squad' : 'party';
+    return {
+      id: accountKey(commander ? commander.account : list.map(m => m.account).sort()[0]),
+      type,
+      commander: commander ? (commander.character || commander.account) : null,
+      commander_account: commander ? commander.account : null,
+      count: Math.max(...g.reporters.map(r => r.group.count), list.length),
+      complete: g.reporters.every(r => r.group.complete),
+      reporters: g.reporters.map(r => r.id),
+      members: list
+    };
+  }).sort((a, b) => b.members.length - a.members.length);
+}
+
+// ------------------------------------------------------------------ instances
+
+function touchInstance(ip) {
+  if (!ip) return null;
+  let inst = knownInstances.get(ip);
+  if (!inst) {
+    inst = { ip, opened_at: null, first_seen: Date.now(), last_seen: Date.now() };
+    knownInstances.set(ip, inst);
+  }
+  inst.last_seen = Date.now();
+  return inst;
+}
+
+// A client on its instance read the map's age. The first reading fixes the
+// instance's opening time; one that disagrees by minutes means a different
+// instance now runs on that IP.
+function recordMapAge(client, ageSeconds) {
+  if (!client.server_ip || typeof ageSeconds !== 'number' || ageSeconds < 0) return;
+  const inst = touchInstance(client.server_ip);
+  const openedAt = Date.now() - ageSeconds * 1000;
+  const minutes = Math.round(ageSeconds / 60);
+  const fresh = ageSeconds < FRESH_MINUTES * 60;
+  if (inst.opened_at === null) {
+    inst.opened_at = openedAt;
+    logEvent(fresh ? 'good' : 'info',
+      `Instance ${inst.ip} is ${minutes} min old${fresh ? ' - fresh' : ''}`, client);
+  }
+  else if (Math.abs(openedAt - inst.opened_at) > SAME_INSTANCE_TOLERANCE_MS) {
+    inst.opened_at = openedAt;
+    inst.first_seen = Date.now();
+    logEvent(fresh ? 'good' : 'info', `${inst.ip} now hosts a different instance, ${minutes} min old`, client);
   }
 }
 
-// Global keep-alive ping interval and client last_seen updater
-const keepAliveInterval = setInterval(() => {
-  const now = Math.floor(Date.now() / 1000);
-  const clientUpdates = [];
-  
-  timerWss.clients.forEach((ws) => {
-    if (ws.isAlive === false) {
-      console.log('Terminating dead client');
-      try {
-        const clientInfo = clients.get(ws);
-        if (clientInfo) {
-          // Store client ID before termination to ensure proper cleanup
-          console.log(`Marking client ${clientInfo.id} for cleanup`);
-          // Add to batch updates
-          clientUpdates.push({
-            id: clientInfo.id,
-            needsCleanup: true
-          });
-        }
-      } catch (error) {
-        console.error('Error preparing client for termination:', error);
-      }
-      return ws.terminate();
-    }
-    
-    // Update last_seen time for active clients
-    ws.isAlive = false;
-    ws.ping();
-    
-    const clientInfo = clients.get(ws);
-    if (clientInfo) {
-      // Add to batch updates
-      clientUpdates.push({
-        id: clientInfo.id,
-        lastSeen: now,
-        needsCleanup: false
-      });
-    }
-  });
-  
-  // Batch update last_seen times and cleanup terminated clients
-  if (clientUpdates.length > 0) {
-    updateClientBatch(clientUpdates, now);
-  }
-}, 30000);
-
-// Create a periodic reconciliation interval (runs every 2 minutes)
-const reconciliationInterval = setInterval(async () => {
-  try {
-    console.log("Starting client reconciliation...");
-    
-    // Get all clients from the database
-    const dbClients = await getAll("SELECT * FROM clients");
-    
-    // Create a set of client IDs that are currently connected in-memory
-    const connectedClientIds = new Set();
-    for (const [ws, clientInfo] of clients.entries()) {
-      connectedClientIds.add(clientInfo.id);
-    }
-    
-    // Find clients in the database that no longer exist in-memory
-    const orphanedClients = dbClients.filter(
-      dbClient => !connectedClientIds.has(dbClient.id)
-    );
-    
-    if (orphanedClients.length > 0) {
-      console.log(`Found ${orphanedClients.length} orphaned clients in database`);
-      
-      for (const orphan of orphanedClients) {
-        try {
-          await runQuery(`DELETE FROM clients WHERE id = ?`, [orphan.id]);
-          console.log(`Removed orphaned client ${orphan.id} from database`);
-          
-          // Notify the room if this orphaned client was in a room
-          if (orphan.room_id) {
-            broadcastToRoom(orphan.room_id, {
-              type: 'client_left',
-              clientId: orphan.id
-            });
-          }
-        } catch (err) {
-          console.error(`Error removing orphaned client ${orphan.id}:`, err);
-        }
-      }
-    } else {
-      console.log("No orphaned clients found");
-    }
-  } catch (error) {
-    console.error("Error during client reconciliation:", error);
-  }
-}, 2 * 60 * 1000);  // Run every 2 minutes
-
-timerWss.on('close', () => {
-  clearInterval(keepAliveInterval);
-  clearInterval(reconciliationInterval);
-  clearInterval(cleanupInterval);
-});
-
-// Broadcast to all clients in a specific room
-function broadcastToRoom(roomId, message, excludeClient = null) {
-  const messageStr = JSON.stringify(message);
-  
-  timerWss.clients.forEach(client => {
-    const clientInfo = clients.get(client);
-    if (client !== excludeClient && 
-        client.readyState === WebSocket.OPEN && 
-        clientInfo && 
-        clientInfo.roomId === roomId) {
-      client.send(messageStr);
-    }
-  });
+function notePassedReset() {
+  if (nextEotmResetAt && nextEotmResetAt <= Date.now()) lastEotmResetAt = nextEotmResetAt;
 }
 
-// Specialized broadcast function for timer updates
-function broadcastTimerUpdate(roomId, message, excludeClient = null) {
-  const messageStr = JSON.stringify(message);
-  const timerId = message.timer ? message.timer.id : null;
-  
-  timerWss.clients.forEach(client => {
-    const clientInfo = clients.get(client);
-    
-    if (client === excludeClient || 
-        !clientInfo || 
-        clientInfo.roomId !== roomId || 
-        client.readyState !== WebSocket.OPEN) {
+function noteEotmReset(resetAt) {
+  if (typeof resetAt !== 'number' || resetAt <= 0) return;
+  notePassedReset();
+  nextEotmResetAt = resetAt < 1e12 ? resetAt * 1000 : resetAt;  // the addon sends unix seconds
+}
+
+function pruneInstances() {
+  const t = Date.now();
+  notePassedReset();
+  for (const [ip, inst] of knownInstances) {
+    if (instances.has(ip)) continue;  // still occupied
+    const resetSince = lastEotmResetAt && inst.last_seen < lastEotmResetAt;
+    if (resetSince || t - inst.last_seen > INSTANCE_FORGET_MS) knownInstances.delete(ip);
+  }
+}
+
+function publicInstance(inst) {
+  const members = [...(instances.get(inst.ip) || [])].map(ws => clients.get(ws)).filter(Boolean);
+  return {
+    ip: inst.ip,
+    opened_at: inst.opened_at,
+    first_seen: inst.first_seen,
+    last_seen: inst.last_seen,
+    clients: members.map(c => c.id),
+    machines: [...new Set(members.map(c => c.machine).filter(Boolean))]
+  };
+}
+
+function buildSnapshot() {
+  pruneInstances();
+  return {
+    type: 'snapshot',
+    server_time: Date.now(),
+    fresh_minutes: FRESH_MINUTES,
+    eotm_reset_at: nextEotmResetAt,
+    clients: [...clients.values()].map(publicClient),
+    instances: [...knownInstances.values()].map(publicInstance),
+    squads: buildSquads()
+  };
+}
+
+let snapshotTimer = null;
+function scheduleSnapshot() {
+  if (snapshotTimer) return;
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null;
+    const targets = authedDashboards();
+    if (targets.length === 0) return;
+    const snapshot = JSON.stringify(buildSnapshot());
+    for (const d of targets) send(d, snapshot);
+  }, SNAPSHOT_THROTTLE_MS);
+}
+
+// ------------------------------------------------------------------ client state updates
+
+// Applies identity fields a client sent, keeping what we already know for any
+// it left out (the addon omits fields it cannot read, e.g. no RTAPI).
+// Older addon builds send placeholders for what they cannot read.
+const PLACEHOLDERS = new Set(['Unknown', 'Unknown IP', '0.0.0.0']);
+
+function realValue(value) {
+  return typeof value === 'string' && value.trim() && !PLACEHOLDERS.has(value) ? value : null;
+}
+
+function updateIdentity(ws, client, data) {
+  const character = realValue(data.character);
+  const account = realValue(data.account);
+  const machine = realValue(data.machine);
+  if (character) client.character = character;
+  if (account) client.account = account;
+  if (machine && machine !== client.machine) {
+    removeFromIndex(machines, client.machine, ws);
+    client.machine = machine;
+    addToIndex(machines, client.machine, ws);
+  }
+  client.last_update = Date.now();
+}
+
+// Older addon builds never say hello: ask clients we cannot name yet, at most
+// every 30 seconds, as the previous server did.
+const STATUS_REQUEST_COOLDOWN_MS = 30000;
+
+function requestStatusIfUnknown(ws, client) {
+  if (client.character && client.machine) return;
+  const t = Date.now();
+  if (t - (client.last_status_request || 0) < STATUS_REQUEST_COOLDOWN_MS) return;
+  client.last_status_request = t;
+  send(ws, { type: 'request_status' });
+}
+
+function setInstance(ws, client, serverIp) {
+  if (client.server_ip === serverIp) return;
+  touchInstance(client.server_ip);  // the one being left was last seen now
+  removeFromIndex(instances, client.server_ip, ws);
+  client.server_ip = serverIp || null;
+  addToIndex(instances, client.server_ip, ws);
+  touchInstance(client.server_ip);
+}
+
+// Fields copied as-is from hello/status when present.
+const STATUS_FIELDS = ['map', 'game_state', 'travel_available', 'render_skip_mode', 'render_skipping',
+  'pacer_patch', 'fps_target', 'eotm_reset_at', 'eotm_reset_estimated'];
+
+function applyStatus(ws, client, data) {
+  updateIdentity(ws, client, data);
+  for (const field of STATUS_FIELDS) {
+    if (data[field] !== undefined) client[field] = data[field];
+  }
+  // A client already in EotM when it (re)connects - after a server restart,
+  // say - names its instance here; one that is not in EotM is on no instance.
+  const statusIp = realValue(data.server_ip);
+  // Builds without in_eotm only report an IP while in EotM.
+  if ((data.in_eotm === true || data.in_eotm === undefined) && statusIp) {
+    setInstance(ws, client, statusIp);
+  }
+  else if (data.in_eotm === false) {
+    setInstance(ws, client, null);
+  }
+  if (data.map_age_s != null) {
+    client.map_age_s = data.map_age_s;
+    client.map_fresh = data.map_fresh;
+    client.map_age_at = Date.now();
+    recordMapAge(client, data.map_age_s);
+  }
+  if (data.auto_accept && typeof data.auto_accept === 'object') {
+    client.auto_accept = {
+      party: data.auto_accept.party === true,
+      squad: data.auto_accept.squad === true,
+      leaders: shortString(data.auto_accept.leaders, 512)
+    };
+  }
+  if (Array.isArray(data.pending_invites)) {
+    client.pending_invites = data.pending_invites.slice(0, 8)
+      .filter(i => i && typeof i === 'object')
+      .map(i => ({ type: i.type === 'squad' ? 'squad' : 'party', leader: shortString(i.leader) }));
+  }
+  if (typeof data.portal_available === 'boolean') client.portal_available = data.portal_available;
+  if (data.group && typeof data.group.source === 'string') client.group_source = shortString(data.group.source, 16);
+  if (data.group !== undefined) {
+    const before = client.group;
+    client.group = sanitizeGroup(data.group);
+    logGroupChange(client, before, client.group);
+  }
+  noteEotmReset(data.eotm_reset_at);
+  touchInstance(client.server_ip);
+}
+
+// Joining or leaving a squad/party is worth a line in the feed; roster churn
+// inside it is not.
+function logGroupChange(client, before, after) {
+  const wasIn = before && before.type !== 'none';
+  const isIn = after && after.type !== 'none';
+  if (!wasIn && isIn) {
+    const cmdr = after.members.find(m => m.commander);
+    logEvent('info', `${label(client)} joined a ${after.type === 'party' ? 'party' : 'squad'}` +
+      (cmdr ? ` (commander ${cmdr.character || cmdr.account})` : ''), client);
+  }
+  else if (wasIn && !isIn) {
+    logEvent('info', `${label(client)} left their ${before.type === 'party' ? 'party' : 'squad'}`, client);
+  }
+}
+
+// ------------------------------------------------------------------ http
+
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const CONTENT_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon'
+};
+
+function healthBody() {
+  return { status: 'ok', clients: clients.size, instances: instances.size, known_instances: knownInstances.size,
+    machines: machines.size, dashboards: dashboards.size };
+}
+
+// Serves the dashboard and the health check.
+function handleRequest(req, res) {
+  let pathname = new URL(req.url, 'http://local').pathname;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { 'Content-Type': 'text/plain' });
+    res.end('Method not allowed');
+    return;
+  }
+  // Relative asset URLs in index.html need the trailing slash.
+  if (pathname === LEGACY_PREFIX) {
+    res.writeHead(301, { Location: LEGACY_PREFIX + '/' });
+    res.end();
+    return;
+  }
+  if (pathname.startsWith(LEGACY_PREFIX + '/')) pathname = pathname.slice(LEGACY_PREFIX.length);
+  const rest = pathname.slice(1);
+  if (rest === 'health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(healthBody()));
+    return;
+  }
+  const file = path.normalize(path.join(PUBLIC_DIR, rest || 'index.html'));
+  const type = CONTENT_TYPES[path.extname(file)];
+  if (!file.startsWith(PUBLIC_DIR + path.sep) || !type) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not found');
+    return;
+  }
+  fs.readFile(file, (err, content) => {
+    if (err) {
+      res.writeHead(err.code === 'ENOENT' ? 404 : 500, { 'Content-Type': 'text/plain' });
+      res.end(err.code === 'ENOENT' ? 'Not found' : 'Server error');
       return;
     }
-    
-    if (timerId && 
-        message.type.startsWith('timer_') && 
-        clientInfo.subscribedTimers.size > 0 && 
-        !clientInfo.subscribedTimers.has(timerId)) {
-      return;
-    }
-    
-    client.send(messageStr);
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+    res.end(req.method === 'HEAD' ? undefined : content);
   });
 }
 
-// Handle WebSocket connections
-timerWss.on('connection', async (ws, req) => {
-  // Set up heartbeat mechanism
+// Dashboards on their own paths, game clients on any other. Game clients are
+// refused at the handshake (HTTP 401) without the token, so an unauthorised
+// connection never reaches the message handlers. The dashboard authenticates
+// by message instead - browsers cannot send headers.
+function handleUpgrade(req, socket, head) {
+  const pathname = new URL(req.url, 'http://local').pathname;
+  if (DASHBOARD_SOCKET_PATHS.has(pathname)) {
+    dashboardWss.handleUpgrade(req, socket, head, ws => dashboardWss.emit('connection', ws, req));
+    return;
+  }
+  if (!tokenMatches(bearerToken(req))) {
+    console.log(`[${now()}] Refused game client from ${req.socket.remoteAddress}: missing or wrong token`);
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  clientWss.handleUpgrade(req, socket, head, ws => clientWss.emit('connection', ws, req));
+}
+
+// ------------------------------------------------------------------ connections
+
+dashboardWss.on('connection', (ws, req) => onConnection(ws, req, true));
+clientWss.on('connection', (ws, req) => onConnection(ws, req, false));
+
+function onConnection(ws, req, isDashboard) {
+  // Behind Render's proxy the socket address is the proxy's.
+  const forwarded = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const remote = forwarded || req.socket.remoteAddress;
+
   ws.isAlive = true;
-  ws.on('pong', () => {
-    ws.isAlive = true;
-  });
+  ws.on('pong', () => { ws.isAlive = true; });
 
-  // Generate client ID for new connection
-  const clientId = crypto.randomUUID();
-  clients.set(ws, { id: clientId, roomId: null, subscribedTimers: new Set() });
-  
-  console.log(`Client connected: ${clientId}`);
-  
-  try {
-    // Send available rooms to the newly connected client
-    const publicRooms = await getAll(`
-      SELECT r.id, r.name, r.created_at, r.is_public,
-        (SELECT COUNT(*) FROM clients WHERE clients.room_id = r.id) AS client_count
-      FROM rooms r
-      WHERE r.is_public = 1 OR r.id = ?
-      ORDER BY r.name
-    `, ['default']);
-    
-    ws.send(JSON.stringify({
-      type: 'available_rooms',
-      rooms: publicRooms
-    }));
-  } catch (error) {
-    console.error('Error getting rooms:', error);
+  if (isDashboard) {
+    dashboards.add(ws);
+    // Without a token configured there is nothing to prove.
+    ws.authed = !TOKEN;
+    if (ws.authed) {
+      sendDashboardWelcome(ws);
+    }
+    else {
+      ws.authTimer = setTimeout(() => {
+        if (!ws.authed) ws.close(1008, 'authentication required');
+      }, DASHBOARD_AUTH_TIMEOUT_MS);
+    }
+    console.log(`[${now()}] Dashboard connected from ${remote}`);
   }
-  
-  // Handle incoming messages
-  ws.on('message', async (data) => {
+  else {
+    const client = {
+      id: ++nextClientId,
+      character: null,
+      account: null,
+      machine: null,
+      server_ip: null,
+      map: null,
+      game_state: null,
+      map_age_s: null,
+      map_fresh: null,
+      map_age_at: null,
+      eotm_reset_at: null,
+      eotm_reset_estimated: null,
+      render_skip_mode: null,
+      render_skipping: null,
+      pacer_patch: null,
+      travel_available: null,
+      fps_target: null,
+      connected_at: Date.now(),
+      last_update: Date.now()
+    };
+    clients.set(ws, client);
+    clientsById.set(client.id, ws);
+    logEvent('info', `Game client #${client.id} connected from ${remote}`, client);
+    setTimeout(() => { if (clients.has(ws)) requestStatusIfUnknown(ws, client); }, 3000);
+    scheduleSnapshot();
+  }
+
+  ws.on('message', (raw) => {
+    let data;
     try {
-      const message = JSON.parse(data.toString());
-      const clientInfo = clients.get(ws);
-      
-      console.log(`Received from ${clientInfo.id}:`, message);
-      
-      // Update client's last seen time
-      const now = Math.floor(Date.now() / 1000);
-      
-      switch(message.type) {
-        case 'join_room':
-          await handleJoinRoom(message, ws, clientInfo, now);
-          break;
-        case 'create_room':
-          await handleCreateRoom(message, ws, clientInfo, now);
-          break;
-        case 'leave_room':
-          await handleLeaveRoom(ws, clientInfo, now);
-          break;
-        case 'create_timer':
-          await handleCreateTimer(message, ws, clientInfo, now);
-          break;
-        case 'delete_timer':
-          await handleDeleteTimer(message, ws, clientInfo);
-          break;
-        case 'start_timer':
-          await handleStartTimer(message, ws, clientInfo);
-          break;
-        case 'pause_timer':
-          await handlePauseTimer(message, ws, clientInfo);
-          break;
-        case 'stop_timer':
-          await handleStopTimer(message, ws, clientInfo);
-          break;
-        case 'get_timers':
-          await handleGetTimers(message, ws, clientInfo);
-          break;
-        case 'subscribe_to_timer':
-          await handleSubscribeToTimer(message, ws, clientInfo);
-          break;
-        case 'unsubscribe_from_timer':
-          await handleUnsubscribeFromTimer(message, ws, clientInfo);
-          break;
-        case 'ping':
-          ws.send(JSON.stringify({ type: 'pong' }));
-          break;
-        default:
-          console.warn(`Unknown message type: ${message.type}`);
-      }
-      
-      // Update the client's last_seen time after processing any message
-      try {
-        await runQuery(`
-          UPDATE clients 
-          SET last_seen = ? 
-          WHERE id = ?
-        `, [now, clientInfo.id]);
-      } catch (err) {
-        console.error(`Error updating last_seen for client ${clientInfo.id}:`, err);
-      }
-    } catch (error) {
-      console.error('Error processing message:', error);
+      data = JSON.parse(raw.toString());
+    } catch (err) {
+      console.error(`[${now()}] Ignoring non-JSON message: ${String(raw).slice(0, 100)}`);
+      return;
+    }
+    if (!data || typeof data !== 'object' || typeof data.type !== 'string') {
+      return;
+    }
+    try {
+      if (dashboards.has(ws)) handleDashboardMessage(ws, data);
+      else handleClientMessage(ws, data);
+    } catch (err) {
+      console.error(`[${now()}] Error handling ${data.type}:`, err);
     }
   });
-  
-  // Handle disconnection with improved cleanup
-  ws.on('close', async () => {
-    const clientInfo = clients.get(ws);
-    if (clientInfo) {
-      console.log(`Client disconnected: ${clientInfo.id}`);
-      
-      if (clientInfo.roomId) {
-        broadcastToRoom(clientInfo.roomId, {
-          type: 'client_left',
-          clientId: clientInfo.id
-        }, ws);
-      }
-      
-      clients.delete(ws);
-      
-      // Immediately remove client entry from database upon disconnect
-      try {
-        const result = await runQuery(`DELETE FROM clients WHERE id = ?`, [clientInfo.id]);
-        console.log(`Client ${clientInfo.id} deleted from database, affected rows: ${result.changes}`);
-      } catch (err) {
-        console.error(`Error deleting client ${clientInfo.id} from database:`, err);
-        
-        // Failsafe: if delete fails, mark as inactive
-        try {
-          await runQuery(`
-            UPDATE clients
-            SET room_id = NULL, last_seen = 0
-            WHERE id = ?
-          `, [clientInfo.id]);
-          console.log(`Client ${clientInfo.id} marked as inactive (failsafe)`);
-        } catch (innerErr) {
-          console.error(`Complete failure to cleanup client ${clientInfo.id}:`, innerErr);
-        }
-      }
+
+  ws.on('close', () => {
+    clearTimeout(ws.authTimer);
+    if (dashboards.delete(ws)) {
+      console.log(`[${now()}] Dashboard disconnected`);
+      return;
     }
+    const client = clients.get(ws);
+    if (client) logEvent('warn', `${label(client)} disconnected`, client);
+    cleanupClient(ws);
+    scheduleSnapshot();
   });
-});
 
-// Room handlers
+  ws.on('error', (error) => {
+    console.error(`[${now()}] WebSocket error:`, error.message);
+  });
+}
 
-async function handleJoinRoom(message, ws, clientInfo, now) {
-  let roomId = message.roomId;
-  const providedPassword = message.password || null;
-  const providedInviteToken = message.inviteToken || null;
-  
-  let room;
-  
-  try {
-    // If no roomId but inviteToken is provided, try to find room by invite token
-    if (!roomId && providedInviteToken) {
-      room = await getOne(`SELECT * FROM rooms WHERE invite_token = ?`, [providedInviteToken]);
-      if (room) {
-        roomId = room.id; // Set roomId if found
+// Drop connections that stopped answering pings.
+const heartbeat = setInterval(() => {
+  [...clientWss.clients, ...dashboardWss.clients].forEach((ws) => {
+    if (!ws.isAlive) {
+      const client = clients.get(ws);
+      if (client) logEvent('bad', `No heartbeat from ${label(client)}, dropping it`, client);
+      ws.terminate(); // fires 'close', which cleans up
+      return;
+    }
+    ws.isAlive = false;
+    const known = clients.get(ws);
+    if (known) requestStatusIfUnknown(ws, known);
+    ws.ping();
+  });
+}, HEARTBEAT_MS);
+
+// Forgotten instances drop off the dashboard even when nothing else changes.
+const instanceSweep = setInterval(() => {
+  const before = knownInstances.size;
+  pruneInstances();
+  if (knownInstances.size !== before) scheduleSnapshot();
+}, 60000);
+
+function close() {
+  clearInterval(heartbeat);
+  clearInterval(instanceSweep);
+  clientWss.close();
+  dashboardWss.close();
+}
+
+// ------------------------------------------------------------------ game client -> server
+
+// Command acknowledgements, with how they read in the event feed.
+const ACKS = {
+  travel_sent: d => [d.ok ? 'info' : 'warn', `travel request ${d.ok ? 'sent' : 'failed'} (${d.source || '?'})`],
+  enter_map_started: () => ['info', 'entering EotM'],
+  enter_map_complete: () => ['good', 'load screen reached'],
+  enter_map_failed: d => ['bad', `could not enter EotM (${d.reason || '?'})`],
+  reconnect_started: () => ['info', 'reconnecting'],
+  reconnect_complete: () => ['good', 'reconnected'],
+  reconnect_failed: d => ['bad', `reconnect failed (${d.reason || '?'})`],
+  fps_updated: d => ['info', `FPS set to ${d.fps}`],
+  fps_limiter_disabled: () => ['info', 'FPS limiter disabled'],
+  memory_limit_set: d => ['info', `memory limit set to ${d.mb} MB`],
+  memory_limit_failed: d => ['warn', `memory limit failed (error ${d.error})`],
+  minimized: () => ['info', 'minimized'],
+  focused: () => ['info', 'focused'],
+  go_to_character_select_sent: () => ['info', 'sent to character select'],
+  sqjoin_sent: d => ['info', `joining squad of ${d.name}`],
+  invite_sent: d => ['info', `invited ${d.name} to party`],
+  auto_accept_set: d => ['info', `auto-accept ${[d.squad && 'squad', d.party && 'party'].filter(Boolean).join(' + ') || 'off'}` +
+    (d.leaders ? ` (only from ${d.leaders})` : '') + (d.available === false ? ' - not available on this client' : '')],
+  accept_invites_queued: d => ['info', `accepting ${d.pending} pending invite(s)`],
+  join_in_map_queued: d => ['info', `joining ${d.name}'s instance`],
+  group_event: d => [/^Accepted|sent$/.test(d.text || '') ? 'good' : 'warn', d.text || 'group event'],
+  sqinvite_sent: d => ['info', `invited ${d.name} to squad`],
+  sqleave_sent: () => ['info', 'left squad'],
+  render_skip_set: d => ['info', `render skip ${d.mode}`],
+  pacer_patch_set: d => ['info', `pacer patch ${d.enabled ? 'on' : 'off'}`],
+  command_rejected: d => ['warn', `rejected ${d.command}: ${d.reason}`]
+};
+
+function handleClientMessage(ws, data) {
+  const client = clients.get(ws);
+  if (!client) return;
+
+  switch (data.type) {
+    case 'hello':
+      applyStatus(ws, client, data);
+      logEvent('info', `${label(client)} online - ${client.map || 'unknown map'}`, client);
+      break;
+
+    case 'status':
+      applyStatus(ws, client, data);
+      break;
+
+    case 'map_update':
+      updateIdentity(ws, client, data);
+      if (!realValue(data.server_ip)) {
+        return;
       }
-    } else {
-      room = await getOne(`SELECT * FROM rooms WHERE id = ?`, [roomId]);
-    }
+      client.map = 'eotm';
+      client.map_age_s = null;   // reported separately once read
+      client.map_fresh = null;
+      client.map_age_at = null;
+      setInstance(ws, client, data.server_ip);
+      logEvent('info', `${label(client)} entered EotM on ${client.server_ip} ` +
+        `(${instances.get(client.server_ip).size} on that instance)`, client);
+      break;
 
-    if (!room) {
-      return ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
-    }
+    case 'map_leave':
+      updateIdentity(ws, client, data);
+      setInstance(ws, client, null);
+      client.map = null;
+      client.map_age_s = null;
+      client.map_fresh = null;
+      client.map_age_at = null;
+      logEvent('info', `${label(client)} left EotM (${data.reason || 'unknown reason'})`, client);
+      break;
 
-    let accessGranted = room.is_public;
+    case 'map_age':
+      client.map_age_s = data.map_age_s;
+      client.map_fresh = data.fresh;
+      client.map_age_at = Date.now();
+      client.last_update = Date.now();
+      logEvent(data.fresh ? 'good' : 'warn',
+        `${label(client)} landed on ${data.fresh ? 'a fresh' : 'an old'} map ` +
+        `${client.server_ip || ''} (${Math.round((data.map_age_s || 0) / 60)} min old)`, client);
+      recordMapAge(client, data.map_age_s);
+      break;
 
-    if (!accessGranted && room.password_hash && providedPassword) {
-      accessGranted = await bcrypt.compare(providedPassword, room.password_hash);
-    }
+    case 'pong':
+      client.last_update = Date.now();
+      return;
 
-    if (!accessGranted && providedInviteToken && providedInviteToken === room.invite_token) {
-      accessGranted = true;
-    }
-
-    if (!accessGranted) {
-      return ws.send(JSON.stringify({ type: 'error', message: 'Invalid credentials or invite token' }));
-    }
-
-    clientInfo.roomId = roomId;
-    clients.set(ws, clientInfo);
-
-    await runQuery(`
-      INSERT INTO clients (id, room_id, last_seen)
-      VALUES (?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET room_id = excluded.room_id, last_seen = excluded.last_seen
-    `, [clientInfo.id, roomId, now]);
-
-    const activeTimers = await getAll(`SELECT * FROM timers WHERE room_id = ?`, [roomId]);
-    const timersWithStates = activeTimers.map(calculateCurrentTimerState);
-
-    ws.send(JSON.stringify({
-      type: 'room_joined',
-      roomId: roomId,
-      room: room,
-      timers: timersWithStates
-    }));
-
-  } catch (error) {
-    console.error('Error joining room:', error);
-    ws.send(JSON.stringify({
-      type: 'error', 
-      message: 'Failed to join room',
-      details: error.message
-    }));
-  }
-}
-
-async function handleCreateRoom(message, ws, clientInfo, now) {
-  const roomId = crypto.randomUUID();
-  const inviteToken = await generateUniqueInviteCode();
-  const roomName = message.name || 'New Room';
-  const isPublic = message.isPublic !== false;
-  let hashedPassword = null;
-
-  try {
-    if (message.password) {
-      hashedPassword = await bcrypt.hash(message.password, 10);
-    }
-
-    await runQuery(`
-      INSERT INTO rooms (id, name, created_at, password_hash, is_public, invite_token)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [roomId, roomName, now, hashedPassword, isPublic ? 1 : 0, inviteToken]);
-
-    clientInfo.roomId = roomId;
-    clients.set(ws, clientInfo);
-
-    ws.send(JSON.stringify({
-      type: 'room_created',
-      room: {
-        id: roomId,
-        name: roomName,
-        created_at: now,
-        is_public: isPublic ? 1 : 0,
-        invite_token: inviteToken
+    default: {
+      const ack = ACKS[data.type];
+      if (!ack) {
+        console.log(`[${now()}] Unknown message type from ${label(client)}: ${data.type}`);
+        return;
       }
-    }));
-
-  } catch (error) {
-    console.error('Error creating room:', error);
-    ws.send(JSON.stringify({
-      type: 'error', 
-      message: 'Failed to create room',
-      details: error.message
-    }));
-  }
-}
-
-async function handleLeaveRoom(ws, clientInfo, now) {
-  if (!clientInfo.roomId) return;
-  
-  const roomId = clientInfo.roomId;
-  
-  try {
-    broadcastToRoom(roomId, {
-      type: 'client_left',
-      clientId: clientInfo.id
-    }, ws);
-    
-    clientInfo.roomId = null;
-    clients.set(ws, clientInfo);
-    
-    await runQuery(`
-      INSERT INTO clients (id, room_id, last_seen)
-      VALUES (?, NULL, ?)
-      ON CONFLICT(id) DO UPDATE SET room_id = NULL, last_seen = excluded.last_seen
-    `, [clientInfo.id, now]);
-    
-    ws.send(JSON.stringify({ type: 'room_left' }));
-    
-    const publicRooms = await getAll(`
-      SELECT r.id, r.name, r.created_at, r.is_public,
-        (SELECT COUNT(*) FROM clients WHERE clients.room_id = r.id) AS client_count
-      FROM rooms r
-      WHERE r.is_public = 1 OR r.id = ?
-      ORDER BY r.name
-    `, ['default']);
-    
-    ws.send(JSON.stringify({
-      type: 'available_rooms',
-      rooms: publicRooms
-    }));
-    
-    console.log(`Client ${clientInfo.id} left room ${roomId}`);
-    
-  } catch (error) {
-    console.error('Error leaving room:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to leave room',
-      error: error.message
-    }));
-  }
-}
-
-async function handleCreateTimer(message, ws, clientInfo, now) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room before creating a timer'
-    }));
-    return;
-  }
-  
-  const timerId = crypto.randomUUID();
-  
-  try {
-    await runQuery(`
-      INSERT INTO timers (id, room_id, name, duration, created_at, status)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [
-      timerId,
-      clientInfo.roomId,
-      message.name || 'Timer',
-      message.duration,
-      now,
-      'created'
-    ]);
-    
-    const timerData = await getOne(`SELECT * FROM timers WHERE id = ?`, [timerId]);
-    
-    // Include exact timer state when broadcasting timer creation
-    broadcastTimerUpdate(clientInfo.roomId, {
-      type: 'timer_created',
-      timer: calculateCurrentTimerState(timerData)
-    });
-    
-    console.log(`Timer ${timerId} created in room ${clientInfo.roomId}`);
-    
-  } catch (error) {
-    console.error('Error creating timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to create timer',
-      error: error.message
-    }));
-  }
-}
-
-async function handleStartTimer(message, ws, clientInfo) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room before controlling a timer'
-    }));
-    return;
-  }
-  
-  const now = Math.floor(Date.now() / 1000);
-  
-  try {
-    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    if (!timer || timer.room_id !== clientInfo.roomId) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Timer not found in your current room'
-      }));
-      return;
+      client.last_update = Date.now();
+      const [level, text] = ack(data);
+      logEvent(level, `${label(client)}: ${text}`, client);
     }
-    
-    // Calculate new started_at time for paused timers
-    let newStartedAt = now;
-    
-    if (timer.status === 'paused' && timer.started_at && timer.paused_at) {
-      // Calculate elapsed time before pause
-      const elapsedBeforePause = timer.paused_at - timer.started_at;
-      
-      // Adjust the new start time to account for already elapsed time
-      newStartedAt = now - elapsedBeforePause;
+  }
+  scheduleSnapshot();
+}
+
+function cleanupClient(ws) {
+  const client = clients.get(ws);
+  if (!client) return;
+  touchInstance(client.server_ip);
+  removeFromIndex(instances, client.server_ip, ws);
+  removeFromIndex(machines, client.machine, ws);
+  clientsById.delete(client.id);
+  clients.delete(ws);
+}
+
+// ------------------------------------------------------------------ dashboard -> server
+
+function intInRange(value, lo, hi, fallback) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= lo && n <= hi ? n : fallback;
+}
+
+function sendDashboardWelcome(ws) {
+  send(ws, { type: 'auth_ok', token_required: !!TOKEN });
+  send(ws, buildSnapshot());
+  send(ws, { type: 'events', events });
+}
+
+// A character or account name going into a chat command: nothing that could
+// end the command early or start another.
+function validName(name) {
+  return typeof name === 'string' && name.trim().length > 0 && name.length <= 64 && !/[\r\n\/]/.test(name);
+}
+
+// The commands a dashboard may send to game clients, and how each is built
+// from the dashboard's request. null means the arguments were invalid.
+const COMMANDS = {
+  enter_map: () => ({ type: 'enter_map' }),
+  bring_to_front: () => ({ type: 'bring_to_front' }),
+  minimize: () => ({ type: 'minimize' }),
+  close: () => ({ type: 'close_game' }),
+  reconnect: () => ({ type: 'reconnect' }),
+  go_to_character_select: () => ({ type: 'go_to_character_select' }),
+  disable_fps_limiter: () => ({ type: 'disable_fps_limiter' }),
+  set_fps: c => {
+    const fps = intInRange(c.fps, 1, 200, null);
+    return fps === null ? null : { type: 'set_fps', fps };
+  },
+  set_render_skip: c => (['off', 'always', 'unfocused'].includes(c.mode) ? { type: 'set_render_skip', mode: c.mode } : null),
+  set_pacer_patch: c => (typeof c.enabled === 'boolean' ? { type: 'set_pacer_patch', enabled: c.enabled } : null),
+  invite: c => (validName(c.name) ? { type: 'invite', name: c.name.trim() } : null),
+  sqinvite: c => (validName(c.name) ? { type: 'sqinvite', name: c.name.trim() } : null),
+  sqjoin: c => (validName(c.name) ? { type: 'sqjoin', name: c.name.trim() } : null),
+  sqleave: () => ({ type: 'sqleave' }),
+  accept_invites: () => ({ type: 'accept_invites' }),
+  join_in_map: c => (validName(c.name) ? { type: 'join_in_map', name: c.name.trim() } : null),
+  set_auto_accept: c => {
+    const out = { type: 'set_auto_accept' };
+    if (c.party !== undefined) {
+      if (typeof c.party !== 'boolean') return null;
+      out.party = c.party;
     }
-    
-    await runQuery(`
-      UPDATE timers
-      SET status = ?, started_at = ?, paused_at = NULL, completed_at = NULL
-      WHERE id = ?
-    `, ['running', newStartedAt, message.timerId]);
-    
-    const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    broadcastTimerUpdate(clientInfo.roomId, {
-      type: 'timer_started',
-      timer: calculateCurrentTimerState(updatedTimer)
-    });
-    
-    console.log(`Timer ${message.timerId} started in room ${clientInfo.roomId}`);
-    
-  } catch (error) {
-    console.error('Error starting timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to start timer',
-      error: error.message
-    }));
+    if (c.squad !== undefined) {
+      if (typeof c.squad !== 'boolean') return null;
+      out.squad = c.squad;
+    }
+    if (c.leaders !== undefined) {
+      if (typeof c.leaders !== 'string' || c.leaders.length > 512 || /[\r\n]/.test(c.leaders)) return null;
+      out.leaders = c.leaders;
+    }
+    return out;
+  },
+  set_memory_limit: c => {
+    const mb = intInRange(c.mb, 256, 32768, null);
+    return mb === null ? null : { type: 'set_memory_limit', mb };
+  }
+};
+
+// target: { kind: 'all' } | { kind: 'machine', value } | { kind: 'instance', value } | { kind: 'clients', value: [ids] }
+function resolveTarget(target) {
+  if (!target || typeof target !== 'object') return null;
+  switch (target.kind) {
+    case 'all': return { sockets: [...clients.keys()], what: 'all clients' };
+    case 'machine': return { sockets: [...(machines.get(target.value) || [])], what: `machine ${target.value}` };
+    case 'instance': return { sockets: [...(instances.get(target.value) || [])], what: `instance ${target.value}` };
+    case 'clients': {
+      if (!Array.isArray(target.value)) return null;
+      const sockets = target.value.map(id => clientsById.get(id)).filter(Boolean);
+      return { sockets, what: `${sockets.length} selected client(s)` };
+    }
+    default: return null;
   }
 }
 
-async function handlePauseTimer(message, ws, clientInfo) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room before controlling a timer'
-    }));
+// Commands without arguments go out as bare strings ("enter_map"), as the
+// previous server sent them: older addon builds only understand that form, and
+// current ones accept both.
+// Exactly the set the previous server sent as strings; everything else stayed JSON.
+const PLAIN_COMMANDS = new Set(['enter_map', 'bring_to_front', 'minimize', 'close_game', 'reconnect',
+  'disable_fps_limiter']);
+
+function toWire(payload) {
+  return Object.keys(payload).length === 1 && PLAIN_COMMANDS.has(payload.type) ? payload.type : payload;
+}
+
+function runCommand(data) {
+  const command = data.command || {};
+  const build = COMMANDS[command.type];
+  const resolved = resolveTarget(data.target);
+  if (!build || !resolved) {
+    logEvent('warn', `Dashboard sent an invalid command (${command.type || 'none'})`);
     return;
   }
-  
-  const now = Math.floor(Date.now() / 1000);
-  
-  try {
-    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    if (!timer || timer.room_id !== clientInfo.roomId) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Timer not found in your current room'
-      }));
-      return;
-    }
-    
-    await runQuery(`
-      UPDATE timers
-      SET status = ?, paused_at = ?
-      WHERE id = ?
-    `, ['paused', now, message.timerId]);
-    
-    const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    broadcastTimerUpdate(clientInfo.roomId, {
-      type: 'timer_paused',
-      timer: calculateCurrentTimerState(updatedTimer)
-    });
-    
-    console.log(`Timer ${message.timerId} paused in room ${clientInfo.roomId}`);
-    
-  } catch (error) {
-    console.error('Error pausing timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to pause timer',
-      error: error.message
-    }));
-  }
-}
-
-async function handleStopTimer(message, ws, clientInfo) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room before controlling a timer'
-    }));
+  const payload = build(command);
+  if (!payload) {
+    logEvent('warn', `Dashboard sent ${command.type} with invalid arguments`);
     return;
   }
-  
-  const now = Math.floor(Date.now() / 1000);
-  
-  try {
-    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    if (!timer || timer.room_id !== clientInfo.roomId) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Timer not found in your current room'
-      }));
-      return;
-    }
-    
-    await runQuery(`
-      UPDATE timers
-      SET status = ?, completed_at = ?
-      WHERE id = ?
-    `, ['completed', now, message.timerId]);
-    
-    const updatedTimer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    broadcastTimerUpdate(clientInfo.roomId, {
-      type: 'timer_completed',
-      timer: calculateCurrentTimerState(updatedTimer)
-    });
-    
-    console.log(`Timer ${message.timerId} stopped in room ${clientInfo.roomId}`);
-    
-  } catch (error) {
-    console.error('Error stopping timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to stop timer',
-      error: error.message
-    }));
-  }
+  let sent = 0;
+  const wire = toWire(payload);
+  for (const ws of resolved.sockets) if (send(ws, wire)) sent++;
+  logEvent('info', `Sent ${command.type} to ${resolved.what} (${sent} delivered)`);
 }
 
-async function handleGetTimers(message, ws, clientInfo) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room to see timers'
-    }));
+function handleDashboardMessage(ws, data) {
+  // Nothing but "auth" until the dashboard has proved it knows the token.
+  if (!ws.authed) {
+    if (data.type === 'auth' && tokenMatches(data.token)) {
+      ws.authed = true;
+      clearTimeout(ws.authTimer);
+      sendDashboardWelcome(ws);
+      console.log(`[${now()}] Dashboard authenticated`);
+    }
+    else {
+      console.log(`[${now()}] Dashboard sent a wrong or missing token, disconnecting`);
+      send(ws, { type: 'auth_failed' });
+      ws.close(1008, 'invalid token');
+    }
     return;
   }
-  
-  try {
-    const timers = await getAll(`SELECT * FROM timers WHERE room_id = ? ORDER BY created_at DESC`, [clientInfo.roomId]);
-    
-    // Calculate current states for each timer
-    const timersWithExactStates = timers.map(calculateCurrentTimerState);
-    
-    ws.send(JSON.stringify({
-      type: 'timer_list',
-      timers: timersWithExactStates
-    }));
-    
-  } catch (error) {
-    console.error('Error getting timers:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to get timers',
-      error: error.message
-    }));
+
+  switch (data.type) {
+    case 'auth': sendDashboardWelcome(ws); break;
+    case 'request_snapshot': send(ws, buildSnapshot()); break;
+    case 'command': runCommand(data); break;
+    case 'close_excess': closeExcess(instances, intInRange(data.keep_count, 0, 100, 2), 'instance'); break;
+    case 'keep_per_machine': closeExcess(machines, intInRange(data.keep_count, 0, 100, 5), 'machine'); break;
+    default:
+      console.log(`[${now()}] Unknown dashboard command: ${data.type}`);
   }
 }
 
-async function handleSubscribeToTimer(message, ws, clientInfo) {
-  const timerId = message.timerId;
-  
-  if (!timerId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Missing timer ID'
-    }));
-    return;
-  }
-  
-  try {
-    const timer = await getOne(`SELECT * FROM timers WHERE id = ? AND room_id = ?`, [timerId, clientInfo.roomId]);
-    
-    if (!timer) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Timer not found in your room'
-      }));
-      return;
+// Closes all but the first `keep` clients of every group (instance or machine).
+function closeExcess(index, keep, groupName) {
+  let total = 0;
+  for (const set of index.values()) {
+    for (const ws of [...set].slice(keep)) {
+      if (send(ws, 'close_game')) total++;
     }
-    
-    clientInfo.subscribedTimers.add(timerId);
-    
-    ws.send(JSON.stringify({
-      type: 'timer_subscribed',
-      timerId: timerId
-    }));
-    
-    console.log(`Client ${clientInfo.id} subscribed to timer ${timerId}`);
-    
-  } catch (error) {
-    console.error('Error subscribing to timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to subscribe to timer',
-      error: error.message
-    }));
   }
+  logEvent('warn', `Closed ${total} client(s), keeping ${keep} per ${groupName}`);
 }
 
-async function handleUnsubscribeFromTimer(message, ws, clientInfo) {
-  const timerId = message.timerId;
-  
-  if (!timerId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Missing timer ID'
-    }));
-    return;
-  }
-  
-  try {
-    clientInfo.subscribedTimers.delete(timerId);
-    
-    ws.send(JSON.stringify({
-      type: 'timer_unsubscribed',
-      timerId: timerId
-    }));
-    
-    console.log(`Client ${clientInfo.id} unsubscribed from timer ${timerId}`);
-    
-  } catch (error) {
-    console.error('Error unsubscribing from timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to unsubscribe from timer',
-      error: error.message
-    }));
-  }
-}
+// ------------------------------------------------------------------ start
 
-async function handleDeleteTimer(message, ws, clientInfo) {
-  if (!clientInfo.roomId) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'You must join a room before deleting a timer'
-    }));
-    return;
-  }
-  
-  try {
-    const timer = await getOne(`SELECT * FROM timers WHERE id = ?`, [message.timerId]);
-    
-    if (!timer || timer.room_id !== clientInfo.roomId) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Timer not found in your current room'
-      }));
-      return;
-    }
-    
-    await runQuery(`DELETE FROM timers WHERE id = ?`, [message.timerId]);
-    
-    broadcastToRoom(clientInfo.roomId, {
-      type: 'timer_deleted',
-      timerId: message.timerId
-    });
-    
-    console.log(`Timer ${message.timerId} deleted from room ${clientInfo.roomId}`);
-    
-  } catch (error) {
-    console.error('Error deleting timer:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Failed to delete timer',
-      error: error.message
-    }));
-  }
-}
+const server = http.createServer(handleRequest);
+server.on('upgrade', handleUpgrade);
 
-// Cleanup old clients periodically (every 5 minutes)
-const cleanupInterval = setInterval(async () => {
-  const cutoff = Math.floor(Date.now() / 1000) - 3600; // 1 hour
-  
-  try {
-    // Get clients that should be cleaned up to notify their rooms
-    const clientsToClean = await getAll(
-      'SELECT id, room_id FROM clients WHERE last_seen < ?', 
-      [cutoff]
-    );
-    
-    // Send notifications for each client before deletion
-    for (const client of clientsToClean) {
-      if (client.room_id) {
-        broadcastToRoom(client.room_id, {
-          type: 'client_left',
-          clientId: client.id
-        });
-      }
-    }
-    
-    // Now delete the inactive clients
-    const result = await runQuery('DELETE FROM clients WHERE last_seen < ?', [cutoff]);
-    console.log(`Cleaned up ${result.changes} inactive clients (inactive > 1 hour)`);
-  } catch (error) {
-    console.error('Error cleaning up clients:', error);
-  }
-}, 5 * 60 * 1000);
-
-// Start the server by listening on the specified port
 server.listen(PORT, () => {
-  console.log(`Room-based Timer WebSocket server running on port ${PORT}`);
+  console.log(`EotM Control listening on port ${PORT}`);
+  if (TOKEN) {
+    console.log('Token check: ON (EOTM_TOKEN is set)');
+  }
+  else {
+    console.log('WARNING: token check is OFF - anyone who can reach this server can control every client.');
+    console.log('         Set EOTM_TOKEN to a long random string to require it.');
+  }
 });
 
-// Close database connection when the server is shutting down
-process.on('SIGINT', () => {
-  db.close();
-  clearInterval(keepAliveInterval);
-  clearInterval(reconciliationInterval);
-  clearInterval(cleanupInterval);
-  eotm.close();
-  process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-  db.close();
-  clearInterval(keepAliveInterval);
-  clearInterval(reconciliationInterval);
-  clearInterval(cleanupInterval);
-  eotm.close();
-  process.exit(0);
-});
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    close();
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  });
+}
