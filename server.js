@@ -160,6 +160,7 @@ function publicClient(c) {
     eotm_reset_at: c.eotm_reset_at,
     eotm_reset_estimated: c.eotm_reset_estimated,
     pacer_patch: c.pacer_patch,
+    view_distance: c.view_distance,
     travel_available: c.travel_available,
     fps_target: c.fps_target,
     connected_at: c.connected_at,
@@ -436,7 +437,7 @@ function setInstance(ws, client, serverIp) {
 }
 
 // Fields copied as-is from hello/status when present.
-const STATUS_FIELDS = ['map', 'game_state', 'travel_available',
+const STATUS_FIELDS = ['map', 'game_state', 'travel_available', 'view_distance',
   'pacer_patch', 'fps_target', 'eotm_reset_at', 'eotm_reset_estimated'];
 
 function applyStatus(ws, client, data) {
@@ -722,6 +723,7 @@ const ACKS = {
   group_event: d => [/^Accepted|sent$/.test(d.text || '') ? 'good' : 'warn', d.text || 'group event'],
   sqinvite_sent: d => ['info', `invited ${d.name} to squad`],
   sqleave_sent: () => ['info', 'left squad'],
+  view_distance_set: d => ['info', `view distance ${d.percent ? d.percent + '%' : 'game default'} (from the next map load)`],
   pacer_patch_set: d => ['info', `pacer patch ${d.enabled ? 'on' : 'off'}`],
   command_rejected: d => ['warn', `rejected ${d.command}: ${d.reason}`]
 };
@@ -835,6 +837,10 @@ const COMMANDS = {
   set_fps: c => {
     const fps = intInRange(c.fps, 1, 200, null);
     return fps === null ? null : { type: 'set_fps', fps };
+  },
+  set_view_distance: c => {
+    const percent = intInRange(c.percent, 0, 100, null);
+    return percent === null ? null : { type: 'set_view_distance', percent };
   },
   set_pacer_patch: c => (typeof c.enabled === 'boolean' ? { type: 'set_pacer_patch', enabled: c.enabled } : null),
   invite: c => (validName(c.name) ? { type: 'invite', name: c.name.trim() } : null),

@@ -72,6 +72,15 @@
         </div>
 
         <div class="cluster">
+          <span class="cluster-label">View</span>
+          <div class="inline-field" title="Map view distance in percent (0 = game default). Applies from the next map load.">
+            <input id="view" type="number" min="0" max="100" step="5" value="30" aria-label="Map view distance in percent">
+            <span class="field-unit">%</span>
+            <button class="btn btn-flat" data-cmd="set_view_distance">Set</button>
+          </div>
+        </div>
+
+        <div class="cluster">
           <span class="cluster-label">RAM</span>
           <div class="inline-field" title="Working-set limit: Windows pages the game out above this">
             <input id="mem" class="wide" type="number" min="256" max="32768" step="256" value="2048" aria-label="Memory limit in MB">

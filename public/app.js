@@ -384,11 +384,13 @@ function updateClientRow(tr, c) {
   }
 
   // Frame cap: the real lever on CPU and GPU per client.
-  setText(cells.renderBadge, c.fps_target ? `${c.fps_target} fps${c.pacer_patch ? ' · pacer' : ''}` : 'Uncapped');
+  const view = c.view_distance ? ` · ${c.view_distance}% view` : '';
+  setText(cells.renderBadge, (c.fps_target ? `${c.fps_target} fps` : 'Uncapped') + view);
   setClass(cells.renderBadge, c.fps_target ? 'badge badge-good' : 'badge badge-warn');
   const details = [
     c.fps_target ? `FPS cap ${c.fps_target}` : 'No FPS cap',
     c.pacer_patch ? 'pacer patch on' : 'pacer patch off',
+    c.view_distance ? `view distance ${c.view_distance}%` : 'view distance: game default',
     c.travel_available === false ? 'travel unavailable' : null
   ].filter(Boolean).join(', ');
   setTitle(cells.renderBadge, details);
@@ -935,6 +937,14 @@ function buildCommand(button) {
       return null;
     }
     command.name = name;
+  }
+  if (type === 'set_view_distance') {
+    const percent = parseInt($('view').value, 10);
+    if (!(percent >= 0 && percent <= 100)) {
+      $('view').focus();
+      return null;
+    }
+    command.percent = percent;
   }
   if (type === 'set_memory_limit') {
     const mb = parseInt($('mem').value, 10);
