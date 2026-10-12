@@ -38,7 +38,7 @@
         <span class="stat-label">Fresh · old instances</span>
         <span class="stat-value"><span id="t-fresh" class="tone-good">0</span><span class="stat-sep">·</span><span id="t-old" class="tone-warn">0</span></span>
       </div>
-      <div class="stat"><span class="stat-label">Rendering skipped</span><span class="stat-value" id="t-skip">0</span></div>
+      <div class="stat"><span class="stat-label">Outside EotM</span><span class="stat-value" id="t-outside">0</span></div>
     </section>
 
     <section class="commandbar" aria-label="Actions">
@@ -60,15 +60,6 @@
             <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
             Reconnect
           </button>
-        </div>
-
-        <div class="cluster">
-          <span class="cluster-label">Render</span>
-          <div class="seg" role="group" aria-label="Rendering">
-            <button data-cmd="set_render_skip" data-mode="off">Normal</button>
-            <button data-cmd="set_render_skip" data-mode="always">Skip</button>
-            <button data-cmd="set_render_skip" data-mode="unfocused">Unfocused</button>
-          </div>
         </div>
 
         <div class="cluster">
@@ -184,7 +175,7 @@
                 <th class="w-where">Where</th>
                 <th class="w-ip hide-sm">Instance</th>
                 <th class="w-age">Map age</th>
-                <th class="w-render hide-md">Rendering</th>
+                <th class="w-render hide-md">Performance</th>
                 <th class="w-seen hide-md">Seen</th>
                 <th class="w-row"><span class="sr-only">Actions</span></th>
               </tr>

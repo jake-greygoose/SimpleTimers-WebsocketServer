@@ -159,8 +159,6 @@ function publicClient(c) {
     map_age_at: c.map_age_at,
     eotm_reset_at: c.eotm_reset_at,
     eotm_reset_estimated: c.eotm_reset_estimated,
-    render_skip_mode: c.render_skip_mode,
-    render_skipping: c.render_skipping,
     pacer_patch: c.pacer_patch,
     travel_available: c.travel_available,
     fps_target: c.fps_target,
@@ -438,7 +436,7 @@ function setInstance(ws, client, serverIp) {
 }
 
 // Fields copied as-is from hello/status when present.
-const STATUS_FIELDS = ['map', 'game_state', 'travel_available', 'render_skip_mode', 'render_skipping',
+const STATUS_FIELDS = ['map', 'game_state', 'travel_available',
   'pacer_patch', 'fps_target', 'eotm_reset_at', 'eotm_reset_estimated'];
 
 function applyStatus(ws, client, data) {
@@ -616,8 +614,6 @@ function onConnection(ws, req, isDashboard) {
       map_age_at: null,
       eotm_reset_at: null,
       eotm_reset_estimated: null,
-      render_skip_mode: null,
-      render_skipping: null,
       pacer_patch: null,
       travel_available: null,
       fps_target: null,
@@ -726,7 +722,6 @@ const ACKS = {
   group_event: d => [/^Accepted|sent$/.test(d.text || '') ? 'good' : 'warn', d.text || 'group event'],
   sqinvite_sent: d => ['info', `invited ${d.name} to squad`],
   sqleave_sent: () => ['info', 'left squad'],
-  render_skip_set: d => ['info', `render skip ${d.mode}`],
   pacer_patch_set: d => ['info', `pacer patch ${d.enabled ? 'on' : 'off'}`],
   command_rejected: d => ['warn', `rejected ${d.command}: ${d.reason}`]
 };
@@ -841,7 +836,6 @@ const COMMANDS = {
     const fps = intInRange(c.fps, 1, 200, null);
     return fps === null ? null : { type: 'set_fps', fps };
   },
-  set_render_skip: c => (['off', 'always', 'unfocused'].includes(c.mode) ? { type: 'set_render_skip', mode: c.mode } : null),
   set_pacer_patch: c => (typeof c.enabled === 'boolean' ? { type: 'set_pacer_patch', enabled: c.enabled } : null),
   invite: c => (validName(c.name) ? { type: 'invite', name: c.name.trim() } : null),
   sqinvite: c => (validName(c.name) ? { type: 'sqinvite', name: c.name.trim() } : null),

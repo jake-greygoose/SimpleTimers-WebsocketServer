@@ -259,7 +259,7 @@ function renderTiles() {
   const ages = [...state.instances.keys()].map(instanceAgeSeconds).filter(a => a != null);
   setText($('t-fresh'), String(ages.filter(isFresh).length));
   setText($('t-old'), String(ages.filter(a => !isFresh(a)).length));
-  setText($('t-skip'), String(all.filter(c => c.render_skipping).length));
+  setText($('t-outside'), String(all.filter(c => !c.server_ip).length));
 }
 
 const ICONS = {
@@ -383,18 +383,9 @@ function updateClientRow(tr, c) {
     setClass(cells.ageBadge, c.server_ip ? 'badge' : 'badge badge-empty');
   }
 
-  let renderText = 'Normal';
-  let renderClass = 'badge';
-  if (c.render_skipping) {
-    renderText = 'Skipped';
-    renderClass = 'badge badge-good';
-  }
-  else if (c.render_skip_mode === 'unfocused') {
-    renderText = 'When unfocused';
-    renderClass = 'badge badge-info';
-  }
-  setText(cells.renderBadge, renderText);
-  setClass(cells.renderBadge, renderClass);
+  // Frame cap: the real lever on CPU and GPU per client.
+  setText(cells.renderBadge, c.fps_target ? `${c.fps_target} fps${c.pacer_patch ? ' · pacer' : ''}` : 'Uncapped');
+  setClass(cells.renderBadge, c.fps_target ? 'badge badge-good' : 'badge badge-warn');
   const details = [
     c.fps_target ? `FPS cap ${c.fps_target}` : 'No FPS cap',
     c.pacer_patch ? 'pacer patch on' : 'pacer patch off',
@@ -841,11 +832,7 @@ function updateActionState() {
 
   // Show the current setting when every targeted client agrees on it.
   const common = (values) => values.length && values.every(v => v === values[0]) ? values[0] : null;
-  const mode = common(targets.map(c => c.render_skip_mode || 'off'));
   const pacer = common(targets.map(c => String(!!c.pacer_patch)));
-  document.querySelectorAll('[data-mode]').forEach(b => {
-    b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
-  });
   document.querySelectorAll('[data-enabled]').forEach(b => {
     b.setAttribute('aria-pressed', String(b.dataset.enabled === pacer));
   });
@@ -935,7 +922,6 @@ function confirmAction(text) {
 function buildCommand(button) {
   const type = button.dataset.cmd;
   const command = { type };
-  if (type === 'set_render_skip') command.mode = button.dataset.mode;
   if (type === 'set_pacer_patch') command.enabled = button.dataset.enabled === 'true';
   if (type === 'set_auto_accept') {
     const auto = button.dataset.auto;
