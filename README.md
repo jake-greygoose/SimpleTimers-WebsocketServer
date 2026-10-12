@@ -31,6 +31,14 @@ connects or reconnects (only what differs is sent). Empty fields are left to
 each client. Saved to the defaults file below; attach a Render disk at `/data`
 to keep them across deploys.
 
+## WvW team
+
+Accounts with no World vs. World team cannot enter EotM ("Team Required").
+Such clients show **No WvW team** in the Where column. Select them and use
+"Set team" in the selection bar, or set "WvW team" in Client defaults so every
+client that connects without a team joins it automatically. Accounts that
+already have a team are never switched.
+
 ## Squad subgroups
 
 The squad tools can create a squad, move clients to a subgroup, and "Group by

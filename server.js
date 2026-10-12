@@ -181,6 +181,7 @@ function publicClient(c) {
     auto_accept: c.auto_accept || null,
     pending_invites: c.pending_invites || [],
     squad_actions_available: c.squad_actions_available === true,
+    wvw_team: c.wvw_team || null,
     portal_available: c.portal_available === true
   };
 }
@@ -388,7 +389,24 @@ function publicInstance(inst) {
 //   memory_mb      256-32768
 //   pacer_patch    true / false
 //   auto_accept    'off' | 'squad' | 'both'
-const EMPTY_DEFAULTS = { fps: null, view_distance: null, memory_mb: null, pacer_patch: null, auto_accept: null };
+//   wvw_team       team id joined by accounts that have no WvW team
+// World restructuring team ids, in the order the game's Matchmaking list shows
+// them. Names are for display only; clients send and receive ids.
+const WVW_TEAM_NAMES = {
+  11001: 'Moogooloo', 11002: "Rall's Rest", 11003: 'Domain of Torment', 11004: 'Yohlon Haven',
+  11005: 'Tombs of Drascir', 11006: 'Hall of Judgment', 11007: 'Throne of Balthazar', 11008: "Dwayna's Temple",
+  11009: "Abaddon's Prison", 11010: 'Cathedral of Blood', 11011: 'Lutgardis Conservatory', 11012: 'Mosswood',
+  12001: 'Skrittsburgh', 12002: "Fortune's Vale", 12003: 'Silent Woods', 12004: "Ettin's Back",
+  12005: 'Domain of Anguish', 12006: 'Palawadan', 12007: 'Bloodstone Gulch', 12008: 'Frost Citadel',
+  12009: 'Dragrimmar', 12010: "Grenth's Door", 12011: 'Mirror of Lyssa', 12012: "Melandru's Dome",
+  12013: "Kormir's Library", 12014: 'Great House Aviary', 12015: 'Bava Nisos'
+};
+
+function teamName(id) {
+  return WVW_TEAM_NAMES[id] || `team ${id}`;
+}
+
+const EMPTY_DEFAULTS = { fps: null, view_distance: null, memory_mb: null, pacer_patch: null, auto_accept: null, wvw_team: null };
 let clientDefaults = { ...EMPTY_DEFAULTS };
 
 function sanitizeDefaults(input) {
@@ -398,7 +416,9 @@ function sanitizeDefaults(input) {
   out.fps = num(input.fps, 0, 200);
   out.view_distance = num(input.view_distance, 0, 100);
   out.memory_mb = num(input.memory_mb, 256, 32768);
-  if (out.fps === undefined || out.view_distance === undefined || out.memory_mb === undefined) return null;
+  out.wvw_team = num(input.wvw_team, 1, 99999);
+  if (out.fps === undefined || out.view_distance === undefined || out.memory_mb === undefined ||
+    out.wvw_team === undefined) return null;
   if (input.pacer_patch !== null && input.pacer_patch !== undefined) {
     if (typeof input.pacer_patch !== 'boolean') return null;
     out.pacer_patch = input.pacer_patch;
@@ -433,6 +453,7 @@ function describeDefaults(d) {
   if (d.memory_mb !== null) parts.push(`RAM ${d.memory_mb} MB`);
   if (d.pacer_patch !== null) parts.push(`pacer ${d.pacer_patch ? 'on' : 'off'}`);
   if (d.auto_accept !== null) parts.push(`auto-accept ${d.auto_accept === 'both' ? 'squad + party' : d.auto_accept}`);
+  if (d.wvw_team !== null) parts.push(`WvW team ${teamName(d.wvw_team)} when missing`);
   return parts.join(', ') || 'nothing managed';
 }
 
@@ -459,12 +480,34 @@ function defaultCommands(client) {
       out.push({ type: 'set_auto_accept', squad: d.auto_accept !== 'off', party: d.auto_accept === 'both' });
     }
   }
+  if (d.wvw_team !== null && needsTeam(client) && !client.team_join_sent) {
+    out.push({ type: 'set_wvw_team', team: d.wvw_team });
+  }
   return out;
+}
+
+// Known to have no team, and able to join one. The client also refuses to
+// switch a team it already has.
+function needsTeam(client) {
+  const t = client.wvw_team;
+  return !!(t && t.available && t.known && t.team === null);
+}
+
+// The default team is joined once per connection, as soon as the client has
+// read its team - which can be after hello.
+function joinDefaultTeam(ws, client) {
+  if (clientDefaults.wvw_team === null || client.team_join_sent || !needsTeam(client)) return;
+  client.team_join_sent = true;
+  send(ws, { type: 'set_wvw_team', team: clientDefaults.wvw_team });
+  logEvent('info', `${label(client)} has no WvW team - joining ${teamName(clientDefaults.wvw_team)}`, client);
 }
 
 function applyDefaults(ws, client) {
   const commands = defaultCommands(client);
-  for (const command of commands) send(ws, command);
+  for (const command of commands) {
+    if (command.type === 'set_wvw_team') client.team_join_sent = true;
+    send(ws, command);
+  }
   return commands.length;
 }
 
@@ -493,6 +536,7 @@ function buildSnapshot() {
     fresh_minutes: FRESH_MINUTES,
     eotm_reset_at: nextEotmResetAt,
     defaults: clientDefaults,
+    wvw_team_names: WVW_TEAM_NAMES,
     clients: [...clients.values()].map(publicClient),
     instances: [...knownInstances.values()].map(publicInstance),
     squads: buildSquads()
@@ -611,6 +655,18 @@ function applyStatus(ws, client, data) {
   }
   if (typeof data.portal_available === 'boolean') client.portal_available = data.portal_available;
   if (typeof data.squad_actions_available === 'boolean') client.squad_actions_available = data.squad_actions_available;
+  if (data.wvw_team && typeof data.wvw_team === 'object') {
+    const t = data.wvw_team;
+    const id = v => (Number.isInteger(v) && v > 0 && v < 1e6 ? v : null);
+    client.wvw_team = {
+      available: t.available === true,
+      known: t.known === true,
+      team: id(t.team),
+      required: t.required === true,
+      teams: Array.isArray(t.teams) ? t.teams.map(id).filter(Boolean).slice(0, 64) : []
+    };
+    joinDefaultTeam(ws, client);
+  }
   if (data.group && typeof data.group.source === 'string') client.group_source = shortString(data.group.source, 16);
   if (data.group !== undefined) {
     const before = client.group;
@@ -864,6 +920,9 @@ const ACKS = {
     (d.leaders ? ` (only from ${d.leaders})` : '') + (d.available === false ? ' - not available on this client' : '')],
   accept_invites_queued: d => ['info', `accepting ${d.pending} pending invite(s)`],
   squad_action_queued: d => ['info', `${d.command} queued`],
+  wvw_team_join_queued: d => ['info', `joining WvW team ${teamName(d.team)}`],
+  wvw_team_result: d => [d.ok ? 'good' : 'warn', d.ok ? `on WvW team ${teamName(d.team)}${d.reason === 'joined' ? ' (joined)' : ''}`
+    : `could not join WvW team ${teamName(d.team)}: ${String(d.reason || 'unknown').replace(/_/g, ' ')}`],
   squad_action_result: d => [d.confirmed ? 'good' : 'warn', `${d.command}: ${d.reason}${d.subgroup ? ` (subgroup ${d.subgroup})` : ''}`],
   join_in_map_queued: d => ['info', `joining ${d.name}'s instance`],
   group_event: d => [/^Accepted|sent$/.test(d.text || '') ? 'good' : 'warn', d.text || 'group event'],
@@ -1017,6 +1076,10 @@ const COMMANDS = {
   },
   accept_invites: () => ({ type: 'accept_invites' }),
   join_in_map: c => (validName(c.name) ? { type: 'join_in_map', name: c.name.trim() } : null),
+  set_wvw_team: c => {
+    const team = intInRange(c.team, 1, 99999, null);
+    return team === null ? null : { type: 'set_wvw_team', team };
+  },
   set_auto_accept: c => {
     const out = { type: 'set_auto_accept' };
     if (c.party !== undefined) {
@@ -1151,6 +1214,18 @@ function runCommand(data) {
   const payload = build(command);
   if (!payload) {
     logEvent('warn', `Dashboard sent ${command.type} with invalid arguments`);
+    return;
+  }
+  if (payload.type === 'set_wvw_team') {
+    // Accounts that already have a team keep it; don't ask them.
+    const sockets = resolved.sockets.filter(ws => {
+      const t = clients.get(ws)?.wvw_team;
+      return !(t && t.known && t.team !== null);
+    });
+    let sent = 0;
+    for (const ws of sockets) if (send(ws, payload)) sent++;
+    logEvent('info', `Set WvW team ${teamName(payload.team)} on ${resolved.what}: ${sent} without a team asked, ` +
+      `${resolved.sockets.length - sockets.length} already on a team`);
     return;
   }
   const wire = toWire(payload);

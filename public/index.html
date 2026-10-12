@@ -228,6 +228,11 @@
       <button class="btn btn-flat btn-sm" data-sel="sqleave" type="button">Leave</button>
     </div>
     <span class="selbar-sep"></span>
+    <div class="selbar-squad" title="Joins this team on accounts that have no WvW team (EotM needs one). Accounts that already have a team are left alone.">
+      <select id="selbar-team" aria-label="WvW team"></select>
+      <button class="btn btn-flat btn-sm" data-sel="set_wvw_team" type="button">Set team</button>
+    </div>
+    <span class="selbar-sep"></span>
     <button class="btn btn-danger-soft btn-sm" data-sel="close" type="button"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg> Close</button>
     <button class="btn btn-flat btn-sm btn-icon" id="selbar-clear" type="button" title="Clear selection" aria-label="Clear selection">
       <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
@@ -249,6 +254,8 @@
         <div class="d-field"><select id="d-pacer"><option value="">not managed</option><option value="true">On</option><option value="false">Off</option></select></div>
         <label for="d-auto">Auto-accept</label>
         <div class="d-field"><select id="d-auto"><option value="">not managed</option><option value="off">Off</option><option value="squad">Squad</option><option value="both">Squad + party</option></select></div>
+        <label for="d-team">WvW team</label>
+        <div class="d-field"><select id="d-team"></select><span class="d-hint">joined by accounts with no team</span></div>
       </div>
       <label class="d-apply"><input type="checkbox" id="d-apply" checked> Also apply to the clients connected now</label>
       <p class="d-error" id="d-error" hidden></p>

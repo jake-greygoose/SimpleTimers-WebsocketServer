@@ -164,6 +164,7 @@ function applySnapshot(snapshot) {
   state.instances = new Map((snapshot.instances || []).map(i => [i.ip, i]));
   state.squads = snapshot.squads || [];
   state.defaults = snapshot.defaults || null;
+  if (snapshot.wvw_team_names) setTeamNames(snapshot.wvw_team_names);
   if (snapshot.fresh_minutes) state.freshMinutes = snapshot.fresh_minutes;
   for (const id of [...state.selected]) {
     if (!state.clients.has(id)) state.selected.delete(id);
@@ -354,6 +355,34 @@ function createGroupRow() {
   return tr;
 }
 
+// ------------------------------------------------------------------ WvW teams
+
+let teamNames = {};
+
+function teamLabel(id) {
+  return teamNames[id] || `Team ${id}`;
+}
+
+// Fills both team pickers: NA then EU, ids in the game's list order.
+function setTeamNames(names) {
+  if (JSON.stringify(names) === JSON.stringify(teamNames)) return;
+  teamNames = names;
+  const ids = Object.keys(names).map(Number).sort((a, b) => a - b);
+  const fill = (select, emptyLabel) => {
+    const keep = select.value;
+    select.replaceChildren(new Option(emptyLabel, ''));
+    for (const [region, lo] of [['NA', 11000], ['EU', 12000]]) {
+      const group = document.createElement('optgroup');
+      group.label = region;
+      for (const id of ids.filter(i => i > lo && i < lo + 1000)) group.appendChild(new Option(names[id], String(id)));
+      if (group.children.length) select.appendChild(group);
+    }
+    select.value = keep;
+  };
+  fill($('selbar-team'), 'WvW team…');
+  fill($('d-team'), 'not managed');
+}
+
 const WHERE = {
   eotm: ['EotM', 'badge badge-info'],
   lions_arch: ["Lion's Arch", 'badge'],
@@ -378,9 +407,14 @@ function updateClientRow(tr, c) {
   setText(cells.machine, c.machine || '—');
 
   const place = c.game_state === 'character_select' || c.game_state === 'loading' ? c.game_state : c.map;
-  const [whereText, whereClass] = WHERE[place] || ['—', 'badge badge-empty'];
+  let [whereText, whereClass] = WHERE[place] || ['—', 'badge badge-empty'];
+  const team = c.wvw_team;
+  // No team means the game refuses EotM; that trumps where the client is.
+  if (team && team.known && team.team === null && team.required) [whereText, whereClass] = ['No WvW team', 'badge badge-bad'];
   setText(cells.whereBadge, whereText);
   setClass(cells.whereBadge, whereClass);
+  setTitle(cells.where, team && team.known ? (team.team ? `WvW team: ${teamLabel(team.team)}` :
+    'No WvW team - use "Set team" in the selection bar') : '');
 
   setText(cells.ip, c.server_ip || (c.loading_server_ip ? `${c.loading_server_ip} (loading)` : '—'));
   setTitle(cells.ip, c.loading_server_ip ? `Destination map ${c.loading_map_id}; not yet in gameplay` : '');
@@ -990,6 +1024,14 @@ $('selbar').addEventListener('click', (event) => {
   const ids = [...state.selected];
   if (!ids.length) return;
   const command = { type: button.dataset.sel };
+  if (command.type === 'set_wvw_team') {
+    const team = parseInt($('selbar-team').value, 10);
+    if (!team) {
+      $('selbar-team').focus();
+      return;
+    }
+    command.team = team;
+  }
   if (command.type === 'sqjoin') {
     const name = $('selbar-squad').value.trim();
     if (!name || name.length > 64 || /[\r\n\/]/.test(name)) {
@@ -1021,6 +1063,7 @@ function fillDefaultsForm() {
   $('d-mem').value = val(d.memory_mb);
   $('d-pacer').value = val(d.pacer_patch);
   $('d-auto').value = val(d.auto_accept);
+  $('d-team').value = val(d.wvw_team);
   $('d-error').hidden = true;
 }
 
@@ -1037,7 +1080,8 @@ function readDefaultsForm() {
     view_distance: num('d-view', 0, 100, 'View distance'),
     memory_mb: num('d-mem', 256, 32768, 'Memory limit'),
     pacer_patch: $('d-pacer').value === '' ? null : $('d-pacer').value === 'true',
-    auto_accept: $('d-auto').value || null
+    auto_accept: $('d-auto').value || null,
+    wvw_team: $('d-team').value ? Number($('d-team').value) : null
   };
 }
 
