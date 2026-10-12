@@ -474,6 +474,20 @@ select {
 .member.cmdr .member-role { color: var(--warn); }
 .member.lt .member-role { color: var(--info); }
 
+.inline-field input.wide { width: 64px; }
+.field-unit { font-size: 12px; color: var(--muted); margin-right: 4px; }
+
+.inst-rotate { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inst-rotate[hidden] { display: none; }
+.inst-rotate label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.inst-rotate input {
+  font: inherit; font-size: 12.5px; color: var(--text);
+  width: 52px; height: 26px; padding: 0 6px;
+  background: var(--surface-2); border: 1px solid transparent; border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.inst-rotate input:focus-visible { background: var(--surface); border-color: var(--accent); box-shadow: var(--ring); }
+
 .btn-xs { height: 26px; padding: 0 9px; border-radius: 6px; font-size: 12.5px; }
 .empty-small { padding: 26px 16px 28px; }
 
@@ -501,7 +515,7 @@ th.w-ip { width: 15%; }
 th.w-age { width: 14%; }
 th.w-render { width: 13%; }
 th.w-seen { width: 10%; }
-th.w-row { width: 116px; }
+th.w-row { width: 148px; }
 
 th, td {
   padding: 0 12px;
@@ -721,7 +735,7 @@ dialog input[type="password"] { width: 100%; padding: 0 12px; margin-bottom: 18p
   th.w-char { width: 34%; }
   th.w-where { width: 26%; }
   th.w-age { width: 30%; }
-  th.w-row { width: 104px; }
+  th.w-row { width: 136px; }
   .menu-panel { right: auto; left: 0; }
   .inst-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 12px; }
   .inst { padding: 12px 12px 10px; gap: 6px; }

@@ -81,6 +81,15 @@
         </div>
 
         <div class="cluster">
+          <span class="cluster-label">RAM</span>
+          <div class="inline-field" title="Working-set limit: Windows pages the game out above this">
+            <input id="mem" class="wide" type="number" min="256" max="32768" step="256" value="2048" aria-label="Memory limit in MB">
+            <span class="field-unit">MB</span>
+            <button class="btn btn-flat" data-cmd="set_memory_limit">Set</button>
+          </div>
+        </div>
+
+        <div class="cluster">
           <span class="cluster-label">Pacer</span>
           <div class="seg" role="group" aria-label="Frame pacer patch">
             <button data-cmd="set_pacer_patch" data-enabled="true">On</button>
@@ -94,6 +103,9 @@
           </button>
           <button class="btn btn-icon" data-cmd="minimize" title="Minimize window" aria-label="Minimize window">
             <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+          </button>
+          <button class="btn btn-icon" data-cmd="go_to_character_select" title="Character select" aria-label="Character select">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>
           </button>
         </div>
 

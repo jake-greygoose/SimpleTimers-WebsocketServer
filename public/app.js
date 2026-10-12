@@ -263,6 +263,7 @@ function renderTiles() {
 }
 
 const ICONS = {
+  charselect: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>',
   focus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>',
   enter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>'
@@ -312,7 +313,8 @@ function createClientRow(id) {
   cells.render.appendChild(cells.renderBadge);
 
   const actions = el('div', 'row-actions');
-  actions.append(iconButton('focus', 'Focus window'), iconButton('enter', 'Enter EotM'), iconButton('close', 'Close game', 'danger'));
+  actions.append(iconButton('focus', 'Focus window'), iconButton('enter', 'Enter EotM'),
+    iconButton('charselect', 'Character select'), iconButton('close', 'Close game', 'danger'));
   cells.actions.appendChild(actions);
 
   tr.append(cells.check, cells.name, cells.machine, cells.where, cells.ip, cells.age, cells.render, cells.seen, cells.actions);
@@ -495,8 +497,23 @@ function createInstanceCard(ip) {
   target.title = 'Send commands to the clients on this instance';
   foot.append(who, target);
 
-  card.append(top, ageRow, meter, meta, foot);
-  card._els = { ageValue, chip, fill, meta, who, target };
+  const rotate = el('div', 'inst-rotate');
+  const keepLabel = el('label', null, 'Keep');
+  const keep = el('input');
+  keep.type = 'number';
+  keep.min = '0';
+  keep.max = '100';
+  keep.value = '5';
+  keep.setAttribute('aria-label', `Clients to keep on ${ip}`);
+  keepLabel.appendChild(keep);
+  const charSelect = el('button', 'btn btn-flat btn-xs', 'Char select rest');
+  charSelect.type = 'button';
+  charSelect.dataset.instAction = 'charselect';
+  charSelect.title = 'Keep the clients that have been here longest; send the rest to character select';
+  rotate.append(keepLabel, charSelect);
+
+  card.append(top, ageRow, meter, meta, foot, rotate);
+  card._els = { ageValue, chip, fill, meta, who, target, rotate, keep, charSelect };
   return card;
 }
 
@@ -528,6 +545,8 @@ function updateInstanceCard(card, inst) {
   }
   setTitle(e.who, inst.machines.join(', '));
   if (e.target.disabled !== !occupied) e.target.disabled = !occupied;
+  if (e.rotate.hidden !== !occupied) e.rotate.hidden = !occupied;
+  e.charSelect.disabled = !state.connected;
 }
 
 // Newest first - finding fresh instances is the point. Unread ages lead,
@@ -571,6 +590,18 @@ instGrid.addEventListener('click', async (event) => {
       button.classList.add('done');
       setTimeout(() => button.classList.remove('done'), 1200);
     } catch { /* clipboard needs https or localhost */ }
+    return;
+  }
+  if (button.dataset.instAction === 'charselect') {
+    const inst = state.instances.get(ip);
+    const keep = parseInt(button.closest('.inst')._els.keep.value, 10);
+    if (!inst || !(keep >= 0 && keep <= 100)) return;
+    const n = Math.max(0, inst.clients.length - keep);
+    if (n === 0) return;
+    if (await confirmAction(`Send ${n} of ${inst.clients.length} client${inst.clients.length === 1 ? '' : 's'} on ${ip} ` +
+      `to character select, keeping the ${Math.min(keep, inst.clients.length)} that have been there longest?`)) {
+      send({ type: 'char_select_rest', server_ip: ip, keep });
+    }
     return;
   }
   const select = $('target');
@@ -887,7 +918,15 @@ function confirmAction(text) {
     const dialog = $('confirm');
     setText($('confirm-text'), text);
     dialog.returnValue = '';
-    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok'), { once: true });
+    // The submit event carries the button and fires at once; 'close' covers
+    // Escape. Whichever comes first answers (the second resolve is a no-op).
+    const form = dialog.querySelector('form');
+    const onSubmit = (event) => resolve(!!event.submitter && event.submitter.value === 'ok');
+    form.addEventListener('submit', onSubmit, { once: true });
+    dialog.addEventListener('close', () => {
+      form.removeEventListener('submit', onSubmit);
+      resolve(dialog.returnValue === 'ok');
+    }, { once: true });
     dialog.showModal();
     $('confirm-ok').focus();
   });
@@ -911,6 +950,14 @@ function buildCommand(button) {
     }
     command.name = name;
   }
+  if (type === 'set_memory_limit') {
+    const mb = parseInt($('mem').value, 10);
+    if (!(mb >= 256 && mb <= 32768)) {
+      $('mem').focus();
+      return null;
+    }
+    command.mb = mb;
+  }
   if (type === 'set_fps') {
     const fps = parseInt($('fps').value, 10);
     if (!(fps >= 1 && fps <= 200)) {
@@ -925,6 +972,8 @@ function buildCommand(button) {
 async function runCommand(command, target) {
   const { n } = describeTarget(target);
   if (n === 0) return;
+  if (command.type === 'go_to_character_select' && n > 1 &&
+    !(await confirmAction(`Send ${n} clients to character select?`))) return;
   if (command.type === 'close' && !(await confirmAction(`Close the game on ${n} client${n === 1 ? '' : 's'}?`))) return;
   send({ type: 'command', target, command });
 }
@@ -941,7 +990,7 @@ rowsEl.addEventListener('click', (event) => {
   const button = event.target.closest('[data-row-action]');
   if (!button) return;
   const id = Number(button.closest('tr').dataset.id);
-  const type = { focus: 'bring_to_front', enter: 'enter_map', close: 'close' }[button.dataset.rowAction];
+  const type = { focus: 'bring_to_front', enter: 'enter_map', charselect: 'go_to_character_select', close: 'close' }[button.dataset.rowAction];
   runCommand({ type }, { kind: 'clients', value: [id] });
 });
 

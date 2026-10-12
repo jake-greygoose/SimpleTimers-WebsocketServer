@@ -1020,9 +1020,26 @@ function handleDashboardMessage(ws, data) {
     case 'command': runCommand(data); break;
     case 'close_excess': closeExcess(instances, intInRange(data.keep_count, 0, 100, 2), 'instance'); break;
     case 'keep_per_machine': closeExcess(machines, intInRange(data.keep_count, 0, 100, 5), 'machine'); break;
+    case 'char_select_rest': charSelectRest(data.server_ip, intInRange(data.keep, 0, 100, null)); break;
     default:
       console.log(`[${now()}] Unknown dashboard command: ${data.type}`);
   }
+}
+
+// Sends all but the `keep` longest-present clients on one instance to
+// character select. Instance sets keep arrival order, so the first ones are
+// the clients that have been there longest.
+function charSelectRest(serverIp, keep) {
+  const set = typeof serverIp === 'string' ? instances.get(serverIp) : null;
+  if (!set || keep === null) {
+    logEvent('warn', 'Dashboard sent char_select_rest for an unknown instance or keep count');
+    return;
+  }
+  let sent = 0;
+  for (const ws of [...set].slice(keep)) {
+    if (send(ws, { type: 'go_to_character_select' })) sent++;
+  }
+  logEvent('info', `Sent ${sent} client(s) on ${serverIp} to character select, keeping ${Math.min(keep, set.size)}`);
 }
 
 // Closes all but the first `keep` clients of every group (instance or machine).

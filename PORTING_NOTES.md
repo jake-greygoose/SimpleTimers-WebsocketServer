@@ -75,7 +75,7 @@ Part of the launch sequence above. It is also useful on its own as an
 longest-present ones to character select. The server needs `arrived_at` per
 client (set in `setInstance`), which it doesn't keep yet.
 
-### 3. "Char Select Rest" per instance (keep N)
+### 3. "Char Select Rest" per instance (keep N) - DONE
 For one instance: keep N clients and send the rest to character select (the
 old version kept the longest-present). New: add a "Character select" item to
 the instance card, taking a keep count, built like `close_excess` but sending
@@ -100,17 +100,17 @@ The old dashboard showed each client's `enter_map_status` (started / complete
 feed events. Port: keep the last status per client in `ACKS` handling and
 show it as a chip in the "Where" column (e.g. "Entering…", "Failed: timeout").
 
-### 7. Character select per client
+### 7. Character select per client - DONE
 A row action for `go_to_character_select`. Trivial: add to the row actions /
 command bar; the server already accepts it.
 
-### 8. Memory limit
+### 8. Memory limit - DONE
 `set_memory_limit` is supported by the server's `COMMANDS` but has no
 dashboard control. Add an "MB" field next to FPS in the command bar.
 
 ## Suggested order
 
 1. ~~Throttled close + staggered focus (4, 5)~~ - done: `sendPaced` in server.js.
-2. Character select per client and per instance (7, 3); memory limit (8).
+2. ~~Character select per client and per instance (7, 3); memory limit (8)~~ - done.
 3. Enter-map status chips (6).
 4. Launch Sequence on the server with fresh-instance awareness (1, 2).
