@@ -163,6 +163,7 @@ function applySnapshot(snapshot) {
   state.clients = new Map((snapshot.clients || []).map(c => [c.id, c]));
   state.instances = new Map((snapshot.instances || []).map(i => [i.ip, i]));
   state.squads = snapshot.squads || [];
+  state.defaults = snapshot.defaults || null;
   if (snapshot.fresh_minutes) state.freshMinutes = snapshot.fresh_minutes;
   for (const id of [...state.selected]) {
     if (!state.clients.has(id)) state.selected.delete(id);
@@ -240,7 +241,17 @@ function isFresh(ageSeconds) {
 
 // ------------------------------------------------------------------ rendering
 
+function renderSelectionBar() {
+  const n = state.selected.size;
+  const bar = $('selbar');
+  if (bar.hidden !== (n === 0)) bar.hidden = n === 0;
+  document.body.classList.toggle('has-selbar', n > 0);
+  setText($('selbar-n'), String(n));
+  bar.querySelectorAll('[data-sel]').forEach(b => { b.disabled = !state.connected || n === 0; });
+}
+
 function render() {
+  renderSelectionBar();
   renderTiles();
   renderInstances();
   renderSquads();
@@ -964,6 +975,83 @@ function buildCommand(button) {
   }
   return command;
 }
+
+// ------------------------------------------------------------------ selection toolbar
+
+$('selbar').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-sel]');
+  if (!button || button.disabled) return;
+  const ids = [...state.selected];
+  if (!ids.length) return;
+  const command = { type: button.dataset.sel };
+  if (command.type === 'sqjoin') {
+    const name = $('selbar-squad').value.trim();
+    if (!name || name.length > 64 || /[\r\n\/]/.test(name)) {
+      $('selbar-squad').focus();
+      return;
+    }
+    command.name = name;
+  }
+  // Always the selection, whatever "Send to" says.
+  runCommand(command, { kind: 'clients', value: ids });
+});
+
+$('selbar-clear').addEventListener('click', () => setSelected([...state.selected], false));
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.selected.size && !document.querySelector('dialog[open]') &&
+    !closeMenuEl.open && document.activeElement?.tagName !== 'INPUT') {
+    setSelected([...state.selected], false);
+  }
+});
+
+// ------------------------------------------------------------------ client defaults
+
+function fillDefaultsForm() {
+  const d = state.defaults || {};
+  const val = (v) => (v === null || v === undefined ? '' : String(v));
+  $('d-fps').value = val(d.fps);
+  $('d-view').value = val(d.view_distance);
+  $('d-mem').value = val(d.memory_mb);
+  $('d-pacer').value = val(d.pacer_patch);
+  $('d-auto').value = val(d.auto_accept);
+  $('d-error').hidden = true;
+}
+
+function readDefaultsForm() {
+  const num = (id, lo, hi, what) => {
+    const raw = $(id).value.trim();
+    if (raw === '') return null;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < lo || n > hi) throw new Error(`${what} must be ${lo}-${hi}, or empty`);
+    return n;
+  };
+  return {
+    fps: num('d-fps', 0, 200, 'FPS cap'),
+    view_distance: num('d-view', 0, 100, 'View distance'),
+    memory_mb: num('d-mem', 256, 32768, 'Memory limit'),
+    pacer_patch: $('d-pacer').value === '' ? null : $('d-pacer').value === 'true',
+    auto_accept: $('d-auto').value || null
+  };
+}
+
+$('open-defaults').addEventListener('click', () => {
+  fillDefaultsForm();
+  $('defaults').showModal();
+});
+
+$('defaults-form').addEventListener('submit', (event) => {
+  if (!event.submitter || event.submitter.value !== 'save') return;
+  try {
+    const defaults = readDefaultsForm();
+    send({ type: 'set_defaults', defaults, apply_now: $('d-apply').checked });
+  }
+  catch (err) {
+    event.preventDefault();  // keep the dialog open
+    setText($('d-error'), err.message);
+    $('d-error').hidden = false;
+  }
+});
 
 async function runCommand(command, target) {
   const { n } = describeTarget(target);

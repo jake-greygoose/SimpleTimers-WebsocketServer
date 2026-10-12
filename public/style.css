@@ -488,6 +488,56 @@ select {
 }
 .inst-rotate input:focus-visible { background: var(--surface); border-color: var(--accent); box-shadow: var(--ring); }
 
+.btn-sm { height: 30px; padding: 0 11px; font-size: 13px; }
+.btn-sm.btn-icon { width: 30px; padding: 0; }
+.topbar .btn-sm svg { width: 15px; height: 15px; }
+
+/* ------------------------------------------------------------ selection toolbar */
+
+.selbar {
+  position: fixed; left: 0; right: 0; bottom: 20px; z-index: 40;
+  width: max-content; margin: 0 auto;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center;
+  max-width: calc(100vw - 32px);
+  padding: 8px 10px 8px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  animation: selbar-in 0.16s ease-out;
+}
+.selbar[hidden] { display: none; }
+@keyframes selbar-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .selbar { animation: none; } }
+.selbar-count { font-size: 13px; color: var(--text-2); white-space: nowrap; margin-right: 4px; }
+.selbar-count strong { color: var(--accent); font-variant-numeric: tabular-nums; }
+.selbar-sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+.selbar-squad { display: flex; align-items: center; gap: 2px; }
+.selbar-squad input {
+  font: inherit; font-size: 13px; color: var(--text);
+  width: 140px; height: 30px; padding: 0 10px; margin-right: 2px;
+  background: var(--surface-2); border: 1px solid transparent; border-radius: var(--radius-sm);
+}
+.selbar-squad input:focus-visible { background: var(--surface); border-color: var(--accent); box-shadow: var(--ring); }
+/* keep the last rows reachable above the bar */
+body.has-selbar main { padding-bottom: 110px; }
+
+/* ------------------------------------------------------------ defaults dialog */
+
+dialog#defaults { width: min(480px, calc(100vw - 32px)); }
+.defaults-grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; align-items: center; margin-bottom: 16px; }
+.defaults-grid label { font-size: 13px; font-weight: 550; color: var(--text-2); }
+.d-field { display: flex; align-items: center; gap: 10px; }
+.d-field input, .d-field select {
+  font: inherit; font-size: 13.5px; color: var(--text);
+  height: 32px; padding: 0 10px; width: 150px;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+}
+.d-field input::placeholder { color: var(--muted); }
+.d-hint { font-size: 12px; color: var(--muted); }
+.d-apply { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); margin-bottom: 14px; }
+.d-error { color: var(--bad); font-size: 13px; }
+
 .btn-xs { height: 26px; padding: 0 9px; border-radius: 6px; font-size: 12.5px; }
 .empty-small { padding: 26px 16px 28px; }
 
@@ -737,6 +787,9 @@ dialog input[type="password"] { width: 100%; padding: 0 12px; margin-bottom: 18p
   th.w-age { width: 30%; }
   th.w-row { width: 136px; }
   .menu-panel { right: auto; left: 0; }
+  .selbar { bottom: 10px; padding: 8px; }
+  .selbar-sep { display: none; }
+  #open-defaults { font-size: 0; gap: 0; width: 30px; padding: 0; }
   .inst-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 12px; }
   .inst { padding: 12px 12px 10px; gap: 6px; }
   .inst-ip { font-size: 13px; }

@@ -53,6 +53,12 @@ const INSTANCE_FORGET_MS = (Number(process.env.EOTM_INSTANCE_FORGET_MINUTES) || 
 // hosts a different instance.
 const SAME_INSTANCE_TOLERANCE_MS = 2 * 60 * 1000;
 
+// Client defaults (FPS cap, view distance, ...) survive restarts in this file.
+// /data is the persistent disk on Render when one is attached; otherwise the
+// file sits next to the server and lasts until the next deploy.
+const DEFAULTS_FILE = process.env.EOTM_DEFAULTS_FILE ||
+  path.join(fs.existsSync('/data') ? '/data' : __dirname, 'eotm-defaults.json');
+
 // Constant-time comparison, so response timing does not leak the token a
 // character at a time. Hashing first makes the lengths equal.
 function tokenMatches(candidate) {
@@ -365,6 +371,112 @@ function publicInstance(inst) {
   };
 }
 
+// ------------------------------------------------------------------ client defaults
+
+// What every client should be set to when it connects. null = not managed:
+// the client keeps whatever it has.
+//   fps            0 = uncapped, 1-200
+//   view_distance  0 = game default, 1-100
+//   memory_mb      256-32768
+//   pacer_patch    true / false
+//   auto_accept    'off' | 'squad' | 'both'
+const EMPTY_DEFAULTS = { fps: null, view_distance: null, memory_mb: null, pacer_patch: null, auto_accept: null };
+let clientDefaults = { ...EMPTY_DEFAULTS };
+
+function sanitizeDefaults(input) {
+  if (!input || typeof input !== 'object') return null;
+  const out = { ...EMPTY_DEFAULTS };
+  const num = (v, lo, hi) => (v === null || v === undefined || v === '' ? null : intInRange(v, lo, hi, undefined));
+  out.fps = num(input.fps, 0, 200);
+  out.view_distance = num(input.view_distance, 0, 100);
+  out.memory_mb = num(input.memory_mb, 256, 32768);
+  if (out.fps === undefined || out.view_distance === undefined || out.memory_mb === undefined) return null;
+  if (input.pacer_patch !== null && input.pacer_patch !== undefined) {
+    if (typeof input.pacer_patch !== 'boolean') return null;
+    out.pacer_patch = input.pacer_patch;
+  }
+  if (input.auto_accept !== null && input.auto_accept !== undefined) {
+    if (!['off', 'squad', 'both'].includes(input.auto_accept)) return null;
+    out.auto_accept = input.auto_accept;
+  }
+  return out;
+}
+
+function loadDefaults() {
+  try {
+    const parsed = sanitizeDefaults(JSON.parse(fs.readFileSync(DEFAULTS_FILE, 'utf8')));
+    if (parsed) clientDefaults = parsed;
+  }
+  catch (err) {
+    if (err.code !== 'ENOENT') console.error(`[${now()}] Could not read ${DEFAULTS_FILE}:`, err.message);
+  }
+}
+
+function saveDefaults() {
+  fs.writeFile(DEFAULTS_FILE, JSON.stringify(clientDefaults, null, 2), (err) => {
+    if (err) console.error(`[${now()}] Could not save ${DEFAULTS_FILE}:`, err.message);
+  });
+}
+
+function describeDefaults(d) {
+  const parts = [];
+  if (d.fps !== null) parts.push(d.fps ? `${d.fps} fps` : 'uncapped');
+  if (d.view_distance !== null) parts.push(d.view_distance ? `view ${d.view_distance}%` : 'view default');
+  if (d.memory_mb !== null) parts.push(`RAM ${d.memory_mb} MB`);
+  if (d.pacer_patch !== null) parts.push(`pacer ${d.pacer_patch ? 'on' : 'off'}`);
+  if (d.auto_accept !== null) parts.push(`auto-accept ${d.auto_accept === 'both' ? 'squad + party' : d.auto_accept}`);
+  return parts.join(', ') || 'nothing managed';
+}
+
+// The commands that bring one client to the defaults, skipping what it already
+// reports. Memory is not reported back, so it is always sent.
+function defaultCommands(client) {
+  const d = clientDefaults;
+  const out = [];
+  if (d.fps !== null) {
+    if (d.fps === 0 && client.fps_target) out.push('disable_fps_limiter');
+    else if (d.fps > 0 && client.fps_target !== d.fps) out.push({ type: 'set_fps', fps: d.fps });
+  }
+  if (d.view_distance !== null && client.view_distance !== d.view_distance) {
+    out.push({ type: 'set_view_distance', percent: d.view_distance });
+  }
+  if (d.memory_mb !== null) out.push({ type: 'set_memory_limit', mb: d.memory_mb });
+  if (d.pacer_patch !== null && client.pacer_patch !== d.pacer_patch) {
+    out.push({ type: 'set_pacer_patch', enabled: d.pacer_patch });
+  }
+  if (d.auto_accept !== null) {
+    const a = client.auto_accept || {};
+    const current = a.squad && a.party ? 'both' : a.squad ? 'squad' : 'off';
+    if (current !== d.auto_accept) {
+      out.push({ type: 'set_auto_accept', squad: d.auto_accept !== 'off', party: d.auto_accept === 'both' });
+    }
+  }
+  return out;
+}
+
+function applyDefaults(ws, client) {
+  const commands = defaultCommands(client);
+  for (const command of commands) send(ws, command);
+  return commands.length;
+}
+
+function setDefaults(input, applyNow) {
+  const parsed = sanitizeDefaults(input);
+  if (!parsed) {
+    logEvent('warn', 'Dashboard sent invalid client defaults');
+    return;
+  }
+  clientDefaults = parsed;
+  saveDefaults();
+  let touched = 0;
+  if (applyNow) {
+    for (const [ws, client] of clients) if (applyDefaults(ws, client)) touched++;
+  }
+  logEvent('info', `Client defaults: ${describeDefaults(clientDefaults)}` +
+    (applyNow ? ` - applied to ${touched} client(s)` : ' - for clients as they connect'));
+  scheduleSnapshot();
+}
+
 function buildSnapshot() {
   pruneInstances();
   return {
@@ -372,6 +484,7 @@ function buildSnapshot() {
     server_time: Date.now(),
     fresh_minutes: FRESH_MINUTES,
     eotm_reset_at: nextEotmResetAt,
+    defaults: clientDefaults,
     clients: [...clients.values()].map(publicClient),
     instances: [...knownInstances.values()].map(publicInstance),
     squads: buildSquads()
@@ -743,10 +856,13 @@ function handleClientMessage(ws, data) {
     case 'hello':
       applyStatus(ws, client, data);
       logEvent('info', `${label(client)} online - ${client.map || 'unknown map'}`, client);
+      applyDefaultsOnce(ws, client);
       break;
 
     case 'status':
       applyStatus(ws, client, data);
+      // Older builds never say hello; their first status stands in for it.
+      applyDefaultsOnce(ws, client);
       break;
 
     case 'map_update':
@@ -817,6 +933,14 @@ function cleanupClient(ws) {
 function intInRange(value, lo, hi, fallback) {
   const n = Number(value);
   return Number.isInteger(n) && n >= lo && n <= hi ? n : fallback;
+}
+
+// Once per connection, as soon as the client has said what it currently has.
+function applyDefaultsOnce(ws, client) {
+  if (client.defaults_applied) return;
+  client.defaults_applied = true;
+  const n = applyDefaults(ws, client);
+  if (n) logEvent('info', `${label(client)}: applied ${n} default setting(s)`, client);
 }
 
 function sendDashboardWelcome(ws) {
@@ -1027,6 +1151,7 @@ function handleDashboardMessage(ws, data) {
     case 'command': runCommand(data); break;
     case 'close_excess': closeExcess(instances, intInRange(data.keep_count, 0, 100, 2), 'instance'); break;
     case 'keep_per_machine': closeExcess(machines, intInRange(data.keep_count, 0, 100, 5), 'machine'); break;
+    case 'set_defaults': setDefaults(data.defaults, data.apply_now === true); break;
     case 'char_select_rest': charSelectRest(data.server_ip, intInRange(data.keep, 0, 100, null)); break;
     default:
       console.log(`[${now()}] Unknown dashboard command: ${data.type}`);
@@ -1062,11 +1187,14 @@ function closeExcess(index, keep, groupName) {
 
 // ------------------------------------------------------------------ start
 
+loadDefaults();
+
 const server = http.createServer(handleRequest);
 server.on('upgrade', handleUpgrade);
 
 server.listen(PORT, () => {
   console.log(`EotM Control listening on port ${PORT}`);
+  console.log(`Client defaults: ${describeDefaults(clientDefaults)} (${DEFAULTS_FILE})`);
   if (TOKEN) {
     console.log('Token check: ON (EOTM_TOKEN is set)');
   }

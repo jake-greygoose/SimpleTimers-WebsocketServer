@@ -24,6 +24,10 @@
     </div>
     <div class="topbar-status">
       <span id="updated" class="muted"></span>
+      <button class="btn btn-flat btn-sm" id="open-defaults" type="button" title="Settings every client gets when it connects">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        Client defaults
+      </button>
       <span id="conn" class="status-pill"><span class="dot"></span><span id="conn-text">Connecting…</span></span>
     </div>
   </header>
@@ -204,6 +208,52 @@
       </section>
     </div>
   </main>
+
+  <div id="selbar" class="selbar" role="toolbar" aria-label="Selected clients" hidden>
+    <span class="selbar-count"><strong id="selbar-n">0</strong> selected</span>
+    <span class="selbar-sep"></span>
+    <button class="btn btn-primary btn-sm" data-sel="enter_map" type="button"><svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/></svg> Enter EotM</button>
+    <button class="btn btn-sm" data-sel="reconnect" type="button"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg> Reconnect</button>
+    <button class="btn btn-sm btn-icon" data-sel="go_to_character_select" type="button" title="Character select" aria-label="Character select"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></button>
+    <button class="btn btn-sm btn-icon" data-sel="bring_to_front" type="button" title="Focus window" aria-label="Focus window"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
+    <button class="btn btn-sm btn-icon" data-sel="minimize" type="button" title="Minimize window" aria-label="Minimize window"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+    <span class="selbar-sep"></span>
+    <div class="selbar-squad">
+      <input id="selbar-squad" type="text" maxlength="64" placeholder="Commander" aria-label="Squad to join">
+      <button class="btn btn-flat btn-sm" data-sel="sqjoin" type="button">Join squad</button>
+      <button class="btn btn-flat btn-sm" data-sel="sqleave" type="button">Leave</button>
+    </div>
+    <span class="selbar-sep"></span>
+    <button class="btn btn-danger-soft btn-sm" data-sel="close" type="button"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg> Close</button>
+    <button class="btn btn-flat btn-sm btn-icon" id="selbar-clear" type="button" title="Clear selection" aria-label="Clear selection">
+      <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+    </button>
+  </div>
+
+  <dialog id="defaults">
+    <form method="dialog" id="defaults-form">
+      <h3>Client defaults</h3>
+      <p>Every client is set to these when it connects or reconnects. Leave a field empty to leave that setting alone.</p>
+      <div class="defaults-grid">
+        <label for="d-fps">FPS cap</label>
+        <div class="d-field"><input id="d-fps" type="number" min="0" max="200" placeholder="not managed"><span class="d-hint">0 = uncapped</span></div>
+        <label for="d-view">View distance</label>
+        <div class="d-field"><input id="d-view" type="number" min="0" max="100" placeholder="not managed"><span class="d-hint">% · 0 = game default</span></div>
+        <label for="d-mem">Memory limit</label>
+        <div class="d-field"><input id="d-mem" type="number" min="256" max="32768" step="256" placeholder="not managed"><span class="d-hint">MB</span></div>
+        <label for="d-pacer">Pacer patch</label>
+        <div class="d-field"><select id="d-pacer"><option value="">not managed</option><option value="true">On</option><option value="false">Off</option></select></div>
+        <label for="d-auto">Auto-accept</label>
+        <div class="d-field"><select id="d-auto"><option value="">not managed</option><option value="off">Off</option><option value="squad">Squad</option><option value="both">Squad + party</option></select></div>
+      </div>
+      <label class="d-apply"><input type="checkbox" id="d-apply" checked> Also apply to the clients connected now</label>
+      <p class="d-error" id="d-error" hidden></p>
+      <div class="dialog-btns">
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-primary" value="save" id="d-save">Save</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="confirm">
     <form method="dialog">

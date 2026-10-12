@@ -23,6 +23,14 @@ npm start
 | Addon WebSocket URL | `wss://<host>/` - any path works, e.g. `/eotm/ws` |
 | Dashboard WebSocket | `/dashboard`, `/admin` or `/eotm/admin` (the page picks it) |
 
+## Client defaults
+
+"Client defaults" in the dashboard's top bar sets the FPS cap, view distance,
+memory limit, pacer patch and auto-accept that every client is given when it
+connects or reconnects (only what differs is sent). Empty fields are left to
+each client. Saved to the defaults file below; attach a Render disk at `/data`
+to keep them across deploys.
+
 ## Environment
 
 | Variable | Meaning |
@@ -32,6 +40,7 @@ npm start
 | `EOTM_INSTANCE_FORGET_MINUTES` | How long an instance with none of our clients stays listed (default 180). |
 | `EOTM_CLOSE_COMMAND_INTERVAL_MS` | Closes are sent one per machine this far apart (default 350). |
 | `EOTM_FOCUS_INTERVAL_MS` | "Focus window" is sent one per machine this far apart (default 1000). |
+| `EOTM_DEFAULTS_FILE` | Where client defaults are saved (default `/data/eotm-defaults.json` when a `/data` disk exists, else next to `server.js`). |
 
 The protocol is described in eotm-assist's `WEBSOCKET_SPEC.md`.
 `PORTING_NOTES.md` lists features of the previous dashboard still to bring over.
