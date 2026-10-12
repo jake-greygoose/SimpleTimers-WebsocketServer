@@ -698,12 +698,19 @@ function close() {
 
 // ------------------------------------------------------------------ game client -> server
 
+const ENTER_FAIL_REASONS = {
+  already_in_progress: 'already entering',
+  reconnect_in_progress: 'a login is already in progress',
+  loading_screen: 'on a loading screen'
+};
+
 // Command acknowledgements, with how they read in the event feed.
 const ACKS = {
   travel_sent: d => [d.ok ? 'info' : 'warn', `travel request ${d.ok ? 'sent' : 'failed'} (${d.source || '?'})`],
-  enter_map_started: () => ['info', 'entering EotM'],
+  enter_map_started: d => ['info', d.from === 'character_select'
+    ? 'at character select - logging in, then entering EotM' : 'entering EotM'],
   enter_map_complete: () => ['good', 'load screen reached'],
-  enter_map_failed: d => ['bad', `could not enter EotM (${d.reason || '?'})`],
+  enter_map_failed: d => ['bad', `could not enter EotM (${ENTER_FAIL_REASONS[d.reason] || d.reason || '?'})`],
   reconnect_started: () => ['info', 'reconnecting'],
   reconnect_complete: () => ['good', 'reconnected'],
   reconnect_failed: d => ['bad', `reconnect failed (${d.reason || '?'})`],
